@@ -1,0 +1,66 @@
+# fits_keyword_comments.yaml
+#
+# Sidecar configuration for tdms_to_fits.py.
+#
+# FITS header keyword comments, keyed by FITS keyword (max 8 characters).
+#
+### ADD PROTECTIONS
+
+
+# Primary HDU keywords (written once per file by convert_to_fits)
+SCHEMA_V: "FITS Format Schema Version"
+DATETIME: "Date and time of file creation"  # Server timestamp
+FILENAME: "Original filename"
+OPERATOR: "Operator's name"
+USERNAME: "Local username using the Python API"
+DETID:    "Unique Sensor ID"
+READOUTB: "Readout Board ID"
+LEDWAVE:  "[nm] LED wavelength"
+
+TEMPTEST: "Nominal detector temperature (K) for this test"
+
+SKIPPED:  "Number of initial exposures skipped"
+N_EXPOS:  "Number of exposures in file"
+NSCANS:   "Number of scans per exposure"
+
+LSB_DROP: "Bits dropped in FITS conversion"
+GAINMODE: "CMOS gain mode: HIGH, LOW, or DUAL"
+GAINELX:  "[e-/ADUe] Nominal gain for 1 BBX pixel sample"
+GAINFITS: "[e-/ADUf] Nominal gain for FITS file"
+GAINBIN:  "[e-/ADUb] Nominal gain for BIN file"
+GAIN_F2B: "Multiply to convert ADUf to ADUb (exact)"
+GAIN_E2B: "Multiply to convert ADUe (electronics) to ADUb"
+GAIN_F2E: "Multiply to convert ADUf to ADUe (electronics)"
+
+# Shouldn't change if using SQUID; measured params with "_" excepted
+V_TG_HI:  "[V] Transfer Gate High"
+V_TG_LO:  "[V] Transfer Gate Low"
+V_PIXREF: "[V] Pixel Reference Level"
+
+EXPTIME:  "Alias to TIMEXP_"
+TIMMISC_: "[s] Time of scan measured since MISC START"
+TIMSCAN:  "[s] Nominal duration of scan"
+# TIMSCAN_: "[s] Measured duration of scan"  # Can't do
+TIMDELAY: "[s] Requested delay between scans"  # multi_expose --> end of scan1 to start of scan2
+TIMEXP:   "[s] Requested total integration time"
+TIMEXP_:  "[s] Measured total integration time"
+
+TYPE:     "Image type"
+LEDV:     "[V] LED voltage setting"
+LEDPWR:   "[bool] LED power source was on"
+LEDMISC:  "[bool] MISC LED switch was on"
+LEDON:    "[bool] Both LED switches on and V>0"
+FLASH:    "[bool] LED was flashed"
+FLASHT:   "[s] Length of flash"
+FLASHV:   "[V] LED voltage during flash"
+
+# Per-exposure keywords (written per exposure by build_ext_header)
+EXP_ID:   "Exposure Index"
+COMPLETE: "Frame completeness check"
+
+NOGLO:    "NOGLO MISC Setting (0-15)"
+PICO_VER: "PICO MISC setting (0-7)"
+PICO_DES: "PICO Description"
+X_ORDER:  "X_ORDER column readout index"
+X_ORDERD: "X_ORDER Description"
+

@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# pyshell.sh — run setup commands, then drop into an interactive Python shell
+
+USERCONFIG=$1
+
+SETUP_CODE="
+try:
+    import camera_class
+    import sys
+
+    camera = camera_class.Camera('$USERCONFIG')
+    print()
+    camera_class.SQUID_logo()
+    print('Setup complete. Try help(camera) for a list of commands, e.g. camera.ping()')
+    cam = camera
+
+except Exception as e:
+    print(e)
+    print('SETUP FAILED')
+"
+
+ipython -i -c "$SETUP_CODE"
