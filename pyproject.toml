@@ -1,44 +1,61 @@
 [build-system]
-# Specifies the build system to use. 
-requires = ["setuptools>=42"]
+requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-# Basic information about your project.
-name = "your-package-name" 
-version = "0.1.0" 
-dependencies = []
-requires-python = ">=3.7"
+name = "pySQUID"
+version = "0.1.0"
+description = "Control and data-reduction tools for the UVEX SQUID camera testbed"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.8"
 authors = [
-  {name = "Your Name", email = "your.email@example.com"}
+  {name = "Chaz Shapiro"}
 ]
 maintainers = [
-  {name = "Your Name", email = "your.email@example.com"}
+  {name = "Chaz Shapiro"}
 ]
-description = "A brief description of your package"
-readme = "README.md" 
-license = { text = "MIT" }
-keywords = ["example", "package", "keywords"] 
+keywords = ["UVEX", "SQUID", "camera", "FITS", "TDMS"]
 classifiers = [
-  "Programming Language :: Python"
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
 ]
-
-[project.urls]
-# Various URLs related to your project. These links are displayed on PyPI.
-Homepage = "https://example.com" 
-Documentation = "https://readthedocs.org"
-Repository = "https://github.com/yourusername/your-repo"
-"Bug Tracker" = "https://github.com/yourusername/your-repo/issues" 
-Changelog = "https://github.com/yourusername/your-repo/blob/master/CHANGELOG.md"
-
-[project.scripts]
-# Defines command-line scripts for your package. Replace with your script and function.
-your-command = "your_module:your_function"
+dependencies = [
+  "numpy",
+  "astropy",
+  "PyYAML",
+  "npTDMS",
+  "ipython",
+]
 
 [project.optional-dependencies]
-# Optional dependencies that can be installed with extra tags, like "dev".
 dev = [
-  "pytest", 
+  "pytest",
   "black",
   "flake8"
 ]
+# cdssubtract_BBx.py only needs "catcam" when processing a whole directory
+# of files at once (SERIES mode); it is not installable from PyPI, so it is
+# not a hard dependency. Install it separately if you need that feature.
+
+[project.scripts]
+# Console-script entry points: pip generates cross-platform wrapper
+# executables for these on install, backed by real Python callables.
+cds = "pySQUID.cdssubtract_BBx:main"
+tdms = "pySQUID.tdms_to_fits:main"
+
+[tool.setuptools]
+# Explicit package list (this is a flat layout: the pySQUID/ package
+# directory sits next to this pyproject.toml).
+packages = ["pySQUID"]
+
+# pysquid is a bash script (not a Python callable), so it can't be a
+# [project.scripts] entry point. setuptools installs it as-is onto PATH
+# instead, alongside the console scripts above.
+script-files = ["pySQUID/pysquid"]
+
+[tool.setuptools.package-data]
+# Ship the yaml file that tdms_to_fits.py loads at runtime relative to
+# its own location.
+pySQUID = ["fits_keyword_comments.yaml"]

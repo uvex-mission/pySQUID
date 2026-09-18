@@ -24,8 +24,6 @@ import sys
 import astropy.io.fits as pf
 import numpy as np
 
-from catcam.utils import FILENAMES_FILE
-
 stack_dict = {
     'median'    :   np.median
     ,'mean'     :   np.mean
@@ -122,6 +120,20 @@ def processCDS(args):
     # Are we processing a standard SERIES in its own directory?  Needs a file with list of filenames
     if path.isdir(args.filename[0]):
         if len(args.filename)>1: sys.exit('Too many arguments; please specify 1 directory only')
+
+        # catcam is only needed for directory-mode (SERIES) processing, so it's
+        # imported here rather than at module load time. This lets the rest of
+        # this module (and the console script) work for users who don't have
+        # catcam installed and who only pass individual filenames.
+        try:
+            from catcam.utils import FILENAMES_FILE
+        except ImportError:
+            sys.exit(
+                'Processing a whole directory requires the "catcam" package '
+                '(needed to locate the series filenames record), which is not '
+                'installed. Install catcam, or pass individual filenames instead.'
+            )
+
         print('Processing the whole directory...')
         IMDIR = args.filename[0]
         # Look for series records
@@ -293,10 +305,13 @@ def create_parser():
 
     return parser
 
-if __name__ == "__main__":
-
+def main():
     parser = create_parser()
     args = parser.parse_args()
 
     _ = processCDS(args)
+
+
+if __name__ == "__main__":
+    main()
 

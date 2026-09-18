@@ -170,7 +170,7 @@ class Camera:
             print('Setting required FITS headers')
 
             DATE = datetime.today().strftime('%Y%m%d')
-            self.config['OUTDIR'] = f'{self.config['DETID']}/{DATE}/'
+            self.config['OUTDIR'] = f"{self.config['DETID']}/{DATE}/"
             self.config['USERNAME'] = os.getlogin()
             
             # Circumvent FITSkey(), set all protected FITS headers
