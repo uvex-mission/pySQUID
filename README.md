@@ -10,7 +10,7 @@ three commands to your environment:
 - `pysquid` — drops you into an interactive IPython shell with a `Camera`
   object already connected to your testbed, using settings from a YAML
   config file you provide.
-- `cds` — digitally CDS-subtracts a raw CMOS `M x N K` image (BBx camera),
+- `cds` — digitally CDS-subtracts a raw CMOS MKxNK image (BBx camera),
   with optional frame stacking and dual-gain splitting.
 - `tdms` — converts split TDMS acquisition files (or a previously-saved
   `.bin` file) into a FITS image sequence.
@@ -29,10 +29,17 @@ individual filenames does not require `catcam`.
 
 ## Getting the code
 
-Clone the repository from GitHub:
+Clone the repository from GitHub over HTTPS:
 
 ```bash
 git clone https://github.com/uvex-mission/pySQUID.git
+cd pySQUID
+```
+
+If you have an SSH key set up with GitHub, you can clone over SSH instead:
+
+```bash
+git clone git@github.com:uvex-mission/pySQUID.git
 cd pySQUID
 ```
 
@@ -71,6 +78,26 @@ pip install -e .
 
 To leave the environment: `conda deactivate`. To come back to it later:
 `conda activate pysquid`.
+
+### Getting updates
+
+To pick up the latest changes later, pull from within the repo:
+
+```bash
+git pull
+```
+
+If you installed with `pip install -e .` (editable), pulled code changes
+take effect immediately — no reinstall needed. If you used a regular
+`pip install .`, re-run it after pulling to pick up the changes:
+
+```bash
+pip install .
+```
+
+Either way, if `pyproject.toml` changed (e.g. a new dependency was added),
+re-run `pip install .` (or `pip install -e .`) so pip can install anything
+new.
 
 ## Configuration
 
@@ -114,8 +141,14 @@ splitting, grey-code descrambling, output type overrides, etc.).
 Convert a TDMS acquisition to FITS:
 
 ```bash
-tdms path/to/acquisition_basename
+tdms path/to/acquisition_basename --fast
 ```
+
+Most users should pass `--fast`, which reuses the block structure from the
+first exposure for all subsequent exposures instead of re-deriving it each
+time. Leave it off only if you're working with a FORTH-scripted test that
+combines images with different formats within the same acquisition, since
+`--fast` assumes every exposure shares the same structure as the first.
 
 Run `tdms --help` for the full set of options (output directory, metadata
 file, binary intermediate output, streaming/low-memory mode, etc.).
