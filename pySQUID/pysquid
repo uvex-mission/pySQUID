@@ -1,7 +1,27 @@
 #!/usr/bin/env bash
 # pysquid — run setup commands, then drop into an interactive Python shell
 
+usage() {
+    echo "Usage: pysquid <config.yaml>"
+    echo
+    echo "  config.yaml   Path to your camera YAML config file"
+}
+
+if [ $# -eq 0 ]; then
+    echo "Error: no config file specified." >&2
+    echo >&2
+    usage >&2
+    exit 1
+fi
+
 USERCONFIG=$1
+
+if [ ! -f "$USERCONFIG" ]; then
+    echo "Error: config file not found: $USERCONFIG" >&2
+    echo >&2
+    usage >&2
+    exit 1
+fi
 
 SETUP_CODE="
 try:
