@@ -237,12 +237,21 @@ class Camera:
 
         return self.send(f'set_bias {bias} {volts}')
 
+    def set_biases(self, biases: dict):
+        ''' Assumes dict of the form {'BIAS1':v1, 'BIAS2':v2, ...} '''
+        ret = []
+        for k,v in biases.items(): 
+            ret.append( self.set_bias(k,v) )
+        return ret
+
     def LED_state(self):
         ''' Query LED state and update stored FITS headers '''
 
         # Example response from Keysight script
         # 1> 14:54:06  set  3.000 V  ON   meas  3.000 V  0.052 mA\r\n
         response = self.send('led_read', parse=False)
+
+        if self.dryrun: return response
 
         Von = response.split('meas')[0].split()[-1]  # item before "meas"
         Vset = response.split('set')[1].split()[0]    # item after "set"
