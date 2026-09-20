@@ -1,6 +1,6 @@
 # pySQUID
 
-Control and data-reduction tools for the UVEX SQUID camera testbed.
+Control and data-reduction tools for SQUID (Server for Quick UVEX Image Data).
 
 pySQUID is a small toolkit for operating a UVEX detector testbed camera and for
 turning its raw output (TDMS acquisitions, raw CMOS FITS frames) into
