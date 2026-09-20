@@ -10,10 +10,10 @@ three commands to your environment:
 - `pysquid` — drops you into an interactive IPython shell with a `Camera`
   object already connected to your testbed, using settings from a YAML
   config file you provide.
-- `cds` — digitally CDS-subtracts a raw CMOS MKxNK image (BBx camera),
-  with optional frame stacking and dual-gain splitting.
 - `tdms` — converts split TDMS acquisition files (or a previously-saved
   `.bin` file) into a FITS image sequence.
+- `cds` — digitally CDS-subtracts a raw CMOS MKxNK image (BBx camera),
+  with optional frame stacking and dual-gain splitting.
 
 ## Requirements
 
@@ -117,7 +117,7 @@ Additional keys (e.g. `HOST`, `PORT`, `VXTRA_HI`, `VXTRA_LO`) can be set to
 override connection and detector defaults. See `pySQUID/USER.yaml` for a
 complete example to copy and edit.
 
-## Usage
+## Data Acquisition Usage
 
 Launch an interactive session connected to your camera:
 
@@ -129,8 +129,14 @@ This starts IPython with a `camera` (and `cam`) object already created and
 connected — try `help(camera)` for the full list of commands, e.g.
 `camera.ping()`.
 
-Run `cds --help` for the full set of options (stacking, dual-gain
-splitting, grey-code descrambling, output type overrides, etc.).
+For a worked example of scripting a full test sequence against the
+`Camera` class directly (rather than the interactive `pysquid` shell), see
+[`pySQUID/lag_example.py`](pySQUID/lag_example.py), which runs an LED-flash
+lag-decay test.
+
+## Data Processing Usage
+
+A YAML file with the same basename should be in the same directory as the image data.
 
 Convert a TDMS acquisition to FITS:
 
@@ -152,22 +158,13 @@ CDS-subtract the CMOS frame data in a raw FITS file:
 cds basename.fits -verbose
 ```
 
-A YAML file with the same basename should be in the same directory as the image data.
 Most users should use `--fast`, which reuses the block structure from the
 first exposure for all subsequent exposures instead of re-deriving it each
 time. Skip it only if you're working with a FORTH-scripted test that
 combines images with different formats within the same acquisition.
 
-Run `tdms --help` for the full set of options (output directory, metadata
-file, binary intermediate output, streaming/low-memory mode, etc.).
+Run `tdms --help` or `cds --help` for the full set of options.
 
-
-
-
-For a worked example of scripting a full test sequence against the
-`Camera` class directly (rather than the interactive `pysquid` shell), see
-[`pySQUID/lag_example.py`](pySQUID/lag_example.py), which runs an LED-flash
-lag-decay test.
 
 ## License
 
