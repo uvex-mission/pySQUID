@@ -12,10 +12,9 @@ from datetime import datetime
 import os
 import socket
 import sys
+import time
 import yaml
  
-HOST = "131.215.196.219"  # uvex-testbed1
-PORT = 7777
 TO_DEFAULT = 3 # Default timeout (s) for server connections and commands
 
 # Safety limits; ### TBC
@@ -32,7 +31,7 @@ MARGIN_S     = 1.
 FLASH_DELAY_S = NICARD_DELAY+SCANTIME_S+MARGIN_S # Minimum delay before flashing LED
 
 # Can't proceed unless these exist in user's config file
-YAML_REQUIRED_KEYS = ['OPERATOR', 'TESTBED', 'DETID', 'DETTYPE', 'DETCTRL', 'LEDWAVE']
+YAML_REQUIRED_KEYS = ['OPERATOR', 'TESTBED', 'DETID', 'DETTYPE', 'DETCTRL', 'LEDWAVE', 'HOST', 'PORT']
 
 PROTECTED_KEYS = ['USERNAME']
 PROTECTED_KEYS += YAML_REQUIRED_KEYS
@@ -60,8 +59,8 @@ class Camera:
             msg = f'Please update your config file: {userConfigFile}'
             raise Exception(msg)
 
-        self.host = HOST
-        self.port = PORT
+        self.host = config['HOST']
+        self.port = config['PORT']
         self.dryrun = False
 
         assert self.ping()  # Returns True if connected
@@ -86,7 +85,7 @@ class Camera:
         return Camera.send_static(cmd, host=self.host, port=self.port, **kwargs)
 
     @staticmethod
-    def send_static(cmd, parse=True, timeout=None, quiet=False, host=HOST, port=PORT):
+    def send_static(cmd, host, port, parse=True, timeout=None, quiet=False):
         '''Send a server command as a text string and return the server response
         Response will be parsed into a space-delimited list unless parse=False
         '''
@@ -136,11 +135,21 @@ class Camera:
         '''This starts the MISC running.  Multiple calls after load() may crash the system.'''
         return self.send('init')
 
-    def restartBBX(self):
-        '''Combination of _load() and _init().  Avoid using these separately.'''
+    def restartBBX(self, settle=0):
+        '''Combination of _load() and _init().  Avoid using these separately.
+
+        settle:  Wait time (s) after reset before continuing
+        '''
         _ = self._load()
         print(_)
-        return self._init()
+        _ = self._init()
+        print(_)
+        print(f'Settling after BBX reset, waiting {settle} sec...')
+        if not self.dryrun: time.sleep(settle)
+        print('Done!')
+        self.FITSkey('TIMSETTL', settle)
+
+        return _
 
     def filebase(self, setval: str | None=None):
         '''Get or set the file basename'''
@@ -354,11 +363,16 @@ if __name__ == "__main__":
     Use it to send server command strings.
     '''
 
-    if len(sys.argv) < 2:
-        sys.exit('Usage:  camera_cmd.py SERVER COMMAND WORDS')
+    if len(sys.argv) < 3:
+        sys.exit('Usage:  camera_cmd.py HOST:PORT COMMAND WORDS')
 
-    cmd = ' '.join(sys.argv[1:])  # Concat all args after 0th into 1 string
+    host, _, port = sys.argv[1].partition(':')
+    if not port:
+        sys.exit('Usage:  camera_cmd.py HOST:PORT COMMAND WORDS')
+    port = int(port)
 
-    _ = Camera.send_static(cmd)
+    cmd = ' '.join(sys.argv[2:])  # Concat remaining args into 1 string
+
+    _ = Camera.send_static(cmd, host=host, port=port)
     print(_)
 
