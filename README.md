@@ -129,29 +129,45 @@ This starts IPython with a `camera` (and `cam`) object already created and
 connected — try `help(camera)` for the full list of commands, e.g.
 `camera.ping()`.
 
-CDS-subtract a set of raw CMOS frames:
-
-```bash
-cds frame1.fits frame2.fits -verbose
-```
-
 Run `cds --help` for the full set of options (stacking, dual-gain
 splitting, grey-code descrambling, output type overrides, etc.).
 
 Convert a TDMS acquisition to FITS:
 
 ```bash
-tdms path/to/acquisition_basename --fast
+tdms path/to/basename.tdms --fast
+```
+or if the .bin file already exists
+```bash
+tdms path/to/basename.bin --fast
+```
+You can take advantage of bifrost's multiple cores:
+```bash
+for bfile in *.bin; do tdms bfile --fast & done  # Using '&' starts the jobs in the background on separate cores
 ```
 
-Most users should pass `--fast`, which reuses the block structure from the
+CDS-subtract the CMOS frame data in a raw FITS file:
+
+```bash
+cds basename.fits -verbose
+```
+
+A YAML file with the same basename should be in the same directory as the image data.
+Most users should use `--fast`, which reuses the block structure from the
 first exposure for all subsequent exposures instead of re-deriving it each
-time. Leave it off only if you're working with a FORTH-scripted test that
-combines images with different formats within the same acquisition, since
-`--fast` assumes every exposure shares the same structure as the first.
+time. Skip it only if you're working with a FORTH-scripted test that
+combines images with different formats within the same acquisition.
 
 Run `tdms --help` for the full set of options (output directory, metadata
 file, binary intermediate output, streaming/low-memory mode, etc.).
+
+
+
+
+For a worked example of scripting a full test sequence against the
+`Camera` class directly (rather than the interactive `pysquid` shell), see
+[`pySQUID/lag_example.py`](pySQUID/lag_example.py), which runs an LED-flash
+lag-decay test.
 
 ## License
 
