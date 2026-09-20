@@ -113,9 +113,18 @@ DETCTRL:  BB2        # Detector controller type
 LEDWAVE:  530        # LED wavelength in nm
 ```
 
-Additional keys (e.g. `HOST`, `PORT`, `VXTRA_HI`, `VXTRA_LO`) can be set to
-override connection and detector defaults. See `pySQUID/USER.yaml` for a
-complete example to copy and edit.
+`TESTBED` is looked up in `pySQUID/testbeds.yaml`, which maps each known
+testbed name to its connection settings (`HOST`, `PORT`, and any similar
+per-testbed parameters) so you don't need to remember them yourself.
+
+`DETID` is similarly looked up in `pySQUID/devices.yaml`, which maps each
+known detector to its bias settings (`V_EXTRA_HI`, `V_EXTRA_LO`, and any
+similar per-device parameters). If a `DETID` isn't listed there, the
+file's `DEFAULT` entry is used instead and a warning is printed.
+
+For either file, setting `HOST`/`PORT`/`V_EXTRA_HI`/`V_EXTRA_LO` (or any
+other looked-up key) directly in your own config file overrides the
+testbeds.yaml/devices.yaml value.
 
 ## Data Acquisition Usage
 

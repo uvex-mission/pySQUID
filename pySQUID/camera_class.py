@@ -20,10 +20,6 @@ TO_DEFAULT = 3 # Default timeout (s) for server connections and commands
 # Safety limits; ### TBC
 VMIN, VMAX = (0,3.3)
 
-### Detector-dependent settings - should be in config file
-V_EXTRA_HI = 3.011
-V_EXTRA_LO = 3.177
-
 
 NICARD_DELAY = 2.   # Delay between sending "expose" and start of 1st frame scan
 SCANTIME_S   = 8.5  # Aproximate FULL-FRAME scan time ### LOW GAIN 6s
@@ -31,10 +27,88 @@ MARGIN_S     = 1.
 FLASH_DELAY_S = NICARD_DELAY+SCANTIME_S+MARGIN_S # Minimum delay before flashing LED
 
 # Can't proceed unless these exist in user's config file
-YAML_REQUIRED_KEYS = ['OPERATOR', 'TESTBED', 'DETID', 'DETTYPE', 'DETCTRL', 'LEDWAVE', 'HOST', 'PORT']
+YAML_REQUIRED_KEYS = ['OPERATOR', 'TESTBED', 'DETID', 'DETTYPE', 'DETCTRL', 'LEDWAVE']
+
+# Per-testbed settings (HOST, PORT, ...) that must be known either from
+# testbeds.yaml or from the user's own config file (which takes priority)
+TESTBED_REQUIRED_KEYS = ['HOST', 'PORT']
+
+# Per-device settings (V_EXTRA_HI, V_EXTRA_LO, ...) looked up from
+# devices.yaml by DETID. Unlike TESTBED_REQUIRED_KEYS, these always end up
+# with a value -- if devices.yaml is missing an entry for a DETID, its
+# DEFAULT entry is used instead (with a warning).
+DEVICE_KEYS = ['V_EXTRA_HI', 'V_EXTRA_LO']
+
+# Reserved key in devices.yaml holding fallback values for any DETID not
+# otherwise listed there
+DEVICES_DEFAULT_KEY = 'DEFAULT'
 
 PROTECTED_KEYS = ['USERNAME']
 PROTECTED_KEYS += YAML_REQUIRED_KEYS
+PROTECTED_KEYS += TESTBED_REQUIRED_KEYS
+PROTECTED_KEYS += DEVICE_KEYS
+
+# Sidecar YAML files supplying default settings for known testbeds/devices
+_TESTBEDS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "testbeds.yaml")
+_DEVICES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "devices.yaml")
+
+
+def get_testbed_defaults(testbed, testbedsFile=_TESTBEDS_PATH):
+    '''Look up the default settings (HOST, PORT, ...) for a named testbed.
+
+    testbed:     TESTBED name, as it would appear in a user's config file
+    testbedsFile: path to the YAML file mapping testbed names to their
+                  settings (defaults to testbeds.yaml shipped alongside
+                  this module)
+
+    Returns a dict of settings for that testbed. Unlike get_device_defaults,
+    there's no generic fallback for an unrecognized TESTBED: a warning is
+    printed and an exception is raised immediately.
+    '''
+    with open(testbedsFile, 'r') as file:
+        testbeds = yaml.safe_load(file) or {}
+
+    if testbed not in testbeds:
+        print(f"\n\nWARNING: TESTBED '{testbed}' is not a known testbed name.")
+        raise Exception(
+            f"Please add TESTBED '{testbed}' to {testbedsFile}, or use a "
+            f"known testbed name in your config file."
+        )
+
+    return testbeds[testbed]
+
+
+def get_device_defaults(detid, devicesFile=_DEVICES_PATH):
+    '''Look up the default per-device settings (V_EXTRA_HI, V_EXTRA_LO, ...)
+    for a DETID.
+
+    detid:       DETID value, as it would appear in a user's config file
+    devicesFile: path to the YAML file mapping DETIDs to their settings
+                 (defaults to devices.yaml shipped alongside this module)
+
+    Returns a dict of settings for that device. If devicesFile has no
+    entry for the given DETID, a warning is printed, the file's
+    DEVICES_DEFAULT_KEY ('DEFAULT') entry is offered as a fallback, and
+    the user is prompted to confirm before proceeding with it.
+    '''
+    with open(devicesFile, 'r') as file:
+        devices = yaml.safe_load(file) or {}
+
+    if detid not in devices:
+        fallback = devices.get(DEVICES_DEFAULT_KEY, {})
+        print(f"\n\nWARNING: DETID '{detid}' is not a known device name; "
+              f"falling back to '{DEVICES_DEFAULT_KEY}' entry: {fallback}")
+        proceed = input('CONTINUE WITH THESE DEFAULT VALUES?  y/[N] > ').strip() or ""
+        if proceed.upper() != 'Y':
+            raise Exception(
+                f"Please add DETID '{detid}' to {devicesFile}, or set "
+                f"{'/'.join(DEVICE_KEYS)} explicitly in your config file."
+            )
+        return dict(fallback)
+
+    return devices[detid]
 
 
 class Camera:
@@ -59,8 +133,30 @@ class Camera:
             msg = f'Please update your config file: {userConfigFile}'
             raise Exception(msg)
 
+        # Fill in per-testbed defaults (HOST, PORT, ...) from testbeds.yaml,
+        # keyed by TESTBED. Anything the user sets explicitly in their own
+        # config file takes priority over the testbeds.yaml value.
+        testbedDefaults = get_testbed_defaults(config['TESTBED'])
+        config = {**testbedDefaults, **config}
+
+        for k in TESTBED_REQUIRED_KEYS:
+            if k not in config.keys():
+                raise KeyError(
+                    f"Required key {k} not found for testbed '{config['TESTBED']}' "
+                    f"in {_TESTBEDS_PATH} or in {userConfigFile}"
+                )
+
+        # Fill in per-device bias defaults (V_EXTRA_HI, V_EXTRA_LO, ...) from
+        # devices.yaml, keyed by DETID. Falls back to devices.yaml's DEFAULT
+        # entry (with a warning) if DETID isn't listed there. Anything the
+        # user sets explicitly in their own config file still takes priority.
+        deviceDefaults = get_device_defaults(config['DETID'])
+        config = {**deviceDefaults, **config}
+
         self.host = config['HOST']
         self.port = config['PORT']
+        self.v_extra_hi = float(config['V_EXTRA_HI'])
+        self.v_extra_lo = float(config['V_EXTRA_LO'])
         self.dryrun = False
 
         assert self.ping()  # Returns True if connected
@@ -231,7 +327,7 @@ class Camera:
             raise ValueError('Invalid gain mode: '+gain)
 
         # Set appropriate V_EXTRA for gain mode
-        v_extra = V_EXTRA_LO if gain.lower().strip().startswith('lo') else V_EXTRA_HI
+        v_extra = self.v_extra_lo if gain.lower().strip().startswith('lo') else self.v_extra_hi
         _ = self.set_bias('V_EXTRA', v_extra)
 
         # Set gain mode

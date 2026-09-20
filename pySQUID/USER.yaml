@@ -1,14 +1,19 @@
 # Testbed settings for users to edit manually
 OPERATOR: cshapiro  # Who are you?
-TESTBED:  testbed1  # Which testbed station?
-HOST: 131.215.196.219  # SQUID IP address on this testbed
-PORT:     7777      # SQUID server port
+TESTBED:  testbed11  # Which testbed station? 
 
 DETID:    W08D02    # CMOS detector ID
 DETTYPE:  NUV       # UVEX detector type (FUV / NUV / LSS / ENG)
 DETCTRL:  BB2       # Detector controller type
 LEDWAVE:  530       # LED wavelength in nm
 
-### DO NOT EDIT
-VXTRA_HI: 3.016     # V_EXTRA for high gain
-VXTRA_LO: 3.182     # V_EXTRA for low gain
+
+#-------- OVERRIDES --------#
+
+# HOST/PORT are looked up from testbeds.yaml based on TESTBED
+# HOST:   131.215.196.219  # SQUID IP address for this testbed
+# PORT:   7777             # SQUID server port
+
+# V_EXTRA_HI/V_EXTRA_LO are looked up from devices.yaml based on DETID
+# V_EXTRA_HI: 3.016     # V_EXTRA for high gain
+# V_EXTRA_LO: 3.182     # V_EXTRA for low gain

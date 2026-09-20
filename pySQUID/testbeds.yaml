@@ -1,0 +1,15 @@
+# testbeds.yaml
+#
+# Known SQUID testbeds and their default connection settings.
+#
+# Each top-level key is a TESTBED name that a user can reference from
+# their own config YAML via the TESTBED key (see USER.yaml). camera_class.py
+# looks up the matching entry here and uses it to fill in HOST, PORT, and
+# any other testbed-specific parameters added in the future.
+#
+# Any key set in the user's own config file takes precedence over the
+# value listed here for that testbed.
+
+testbed1:
+  HOST: 131.215.196.219  # uvex-testbed1
+  PORT: 7777

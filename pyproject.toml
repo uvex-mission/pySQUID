@@ -56,6 +56,6 @@ packages = ["pySQUID"]
 script-files = ["pySQUID/pysquid"]
 
 [tool.setuptools.package-data]
-# Ship the yaml file that tdms_to_fits.py loads at runtime relative to
-# its own location.
-pySQUID = ["fits_keyword_comments.yaml"]
+# Ship the yaml files that tdms_to_fits.py and camera_class.py load at
+# runtime relative to their own location.
+pySQUID = ["fits_keyword_comments.yaml", "testbeds.yaml", "devices.yaml"]
