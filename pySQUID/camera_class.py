@@ -128,6 +128,20 @@ class Camera:
         print(response)
         return (response.upper())=='PONG'
 
+    def _load(self):
+        '''This resets the board, loads the firmware, and leaves the MISC idle.  Follow with init()'''
+        return self.send('load')
+
+    def _init(self):
+        '''This starts the MISC running.  Multiple calls after load() may crash the system.'''
+        return self.send('init')
+
+    def restartBBX(self):
+        '''Combination of _load() and _init().  Avoid using these separately.'''
+        _ = self._load()
+        print(_)
+        return self._init()
+
     def filebase(self, setval: str | None=None):
         '''Get or set the file basename'''
         if setval is not None:
