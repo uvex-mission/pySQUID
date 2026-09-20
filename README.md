@@ -110,7 +110,7 @@ TESTBED:  testbed1   # Which testbed station?
 DETID:    W08D02     # CMOS detector ID
 DETTYPE:  NUV        # UVEX detector type (FUV / NUV / LSS / ENG)
 DETCTRL:  BB2        # Detector controller type
-LEDWAVE:  530         # LED wavelength in nm
+LEDWAVE:  530        # LED wavelength in nm
 ```
 
 Additional keys (e.g. `HOST`, `PORT`, `VXTRA_HI`, `VXTRA_LO`) can be set to
@@ -141,27 +141,27 @@ A YAML file with the same basename should be in the same directory as the image 
 Convert a TDMS acquisition to FITS:
 
 ```bash
-tdms path/to/basename.tdms --fast
+tdms path/to/basename.tdms --fast  # Alongside basename.yaml
 ```
 or if the .bin file already exists
 ```bash
-tdms path/to/basename.bin --fast
+tdms path/to/basename.bin --fast  # Alongside basename.yaml
 ```
 You can take advantage of bifrost's multiple cores:
 ```bash
 for bfile in *.bin; do tdms bfile --fast & done  # Using '&' starts the jobs in the background on separate cores
 ```
 
-CDS-subtract the CMOS frame data in a raw FITS file:
-
-```bash
-cds basename.fits -verbose
-```
-
 Most users should use `--fast`, which reuses the block structure from the
 first exposure for all subsequent exposures instead of re-deriving it each
 time. Skip it only if you're working with a FORTH-scripted test that
 combines images with different formats within the same acquisition.
+
+Next, CDS-subtract the CMOS frame data in a raw FITS file:
+
+```bash
+cds basename.fits -verbose
+```
 
 Run `tdms --help` or `cds --help` for the full set of options.
 
