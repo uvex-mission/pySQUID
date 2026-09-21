@@ -31,17 +31,17 @@ BIASES = {
 	'VHIGH_TG':2.0
 	}
 
-NOGLO = 14  # We think the best NOGLO mode is typically 14
+NOGLO = 14  			# The best NOGLO mode is typically 14
 
 # These settings produce ~2x saturation in low gain mode
 # Include 0V as baseline measurement with same timing
 VLED = (0, 6.0)
-EXPTIME_FLASH_S = 45
-DELAY_FLASH_S = 12
-FLASH_S = 24
+EXPTIME_FLASH_S = 45	# Duration of exposure containing the flash
+DELAY_FLASH_S = 12 		# Delay before flash start
+FLASH_S = 24 			# Flash duration
 
-NEXP_DARK = 12  # Number of exposures after LED flash
-DARKTIME_S = 300  # Dark duration (s)
+NEXP_DARK = 12  		# Number of exposures after LED flash
+DARKTIME_S = 300  		# Dark duration (s)
 # DARKTIMES_S = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
 # np.random.shuffle(DARKTIMES_S)  # Randomize to disrupt trends
 
@@ -70,14 +70,14 @@ cam.dryrun = DRYRUN  # If True, print commands instead of executing them
 cam.restartBBX(settle=TIMSETTL)  # Make sure BBX is in our default configuration
 
 cam.FITSkeys(FITS_HEADERS)  # Load custom FITS headers
-cam.filebase(FILEBASE)  # Set the output FITS filename base
-cam.imnum(I_START)      # Set the starting image number for filenaming
+cam.filebase(FILEBASE)  	# Set the output FITS filename base
+cam.imnum(I_START)      	# Set the starting image number for filenaming
 
-cam.set_biases(BIASES)  ### Set bias voltages to non-defaults
-cam.set_NOGLO(NOGLO)    # Set detector controller NOGLO mode
+cam.set_biases(BIASES)  	### Set bias voltages to non-defaults
+cam.set_NOGLO(NOGLO)    	# Set detector controller NOGLO mode
 
-cam.LED_MISC_ON()  # Enable MISC LED switch
-cam.LED_OFF()      # Start with LED power off
+cam.LED_MISC_ON()  			# Enable MISC LED switch
+cam.LED_OFF()      			# Start with LED power off
 
 # Clear detector
 cam.set_gain('HIGH')              # Switch detector to high gain mode
@@ -92,7 +92,7 @@ for vled in VLED:
 	print(_)
 
 	# Darks to watch lag decay;  0th image will contain ~1 frame time of lag
-	cam.set_gain('HIGH')           # Back to high gain mode for the dark series
+	cam.set_gain('HIGH')    # Back to high gain mode for the dark series
 	_ = cam.expose(DARKTIME_S, NEXP_DARK)  # Take NEXP_DARK dark exposures of length dt
 	print(_)
 
