@@ -56,16 +56,16 @@ isolated from everything else:
 
 ```bash
 # 1. Create a fresh environment (any Python 3.8+ works; 3.11 shown here)
-conda create -n pysquid python=3.11
+conda create -n uvexcmos python=3.11
 
 # 2. Activate it
-conda activate pysquid
+conda activate uvexcmos
 
 # 3. Install pySQUID from the cloned repo (run this from the folder containing pyproject.toml)
 pip install .
 ```
 
-This installs pySQUID and its dependencies into the `pysquid` conda
+This installs pySQUID and its dependencies into the `uvexcmos` conda
 environment and puts `pysquid`, `cds`, and `tdms` on `PATH` for as long as
 that environment is active.
 
@@ -77,7 +77,7 @@ pip install -e .
 ```
 
 To leave the environment: `conda deactivate`. To come back to it later:
-`conda activate pysquid`.
+`conda activate uvexcmos`.
 
 ### Getting updates
 
