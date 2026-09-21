@@ -163,8 +163,8 @@ for bfile in *.bin; do tdms bfile --fast & done  # Using '&' starts the jobs in 
 
 Most users should use `--fast`, which reuses the block structure from the
 first exposure for all subsequent exposures instead of re-deriving it each
-time. Skip it only if you're working with a FORTH-scripted test that
-combines images with different formats within the same acquisition.
+time. Skip it only if you're working with a file that combines images with
+different formats (e.g. some FORTH-scripted tests).
 
 Next, CDS-subtract the CMOS frame data in a raw FITS file:
 
@@ -173,6 +173,18 @@ cds basename.fits -verbose
 ```
 
 Run `tdms --help` or `cds --help` for the full set of options.
+
+## Understanding CMOS image data
+
+Each FITS image extension represents a pair of scans (Correlated Double Sampling; CDS) through the CMOS detector (possibly a subset of rows).  On the first scan, the pixel sense nodes are reset (line by line) and the baseline values are read.  After the last row is read, the 2nd scan starts immediately.  On this scan, the pixel transfer gates (TG) are pulsed to allow charge to flow in from the image area, then the new pixel values are read.  Thus we generate a pair of frames whose difference represents the collected charge (in uncalibrated units; ADU).  *This is the basic logic of CDS; the actual BBX operation may include extra steps to mitigate systematic effects.*
+
+The charge collected in the scan pair includes all of the charge integrated on the image area *since the previous scan*.  In particular, the first image extension of a FITS file contains charge collected *since the end of the previous image file*.  If the detector has been sitting idle for some time or has just been reset, the very first image is not very useful and may even be saturated, which takes multiple reads to clear.
+
+Note that the total integration time of an exposure includes the time it takes to scan once through, which is the minimum exposure time.
+
+BBX has an internal clock whose value (in seconds) is saved as TIMMISC_ in the FITS header for each scan.  You can work out the integration time between scans by taking differences of this value; this is done for you in a single FITS file (see TIMEXP_ or EXPTIME) but not across files (EXPTIME for extension 1 is set to -1).  The TIMEXP header (no "_") records the requested exposure time and is useful for sorting data since EXPTIME may have variations on the order of ms that can mess up analysis scripts.
+
+To convert the CDS-subtracted data to units of e-, multiply by the value in GAINFITS.  This is only approximate and does not account for nonlinearity.  Precise results require using the gain (e-/ADU) function from a PTC analysis for the detector.
 
 
 ## License
