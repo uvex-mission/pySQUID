@@ -12,7 +12,7 @@ SCHEMA_V: "FITS Format Schema Version"
 DATETIME: "Date and time of file creation"  # Server timestamp
 FILENAME: "Original filename"
 OPERATOR: "Operator's name"
-USERNAME: "Local username using the Python API"
+USER:     "Local username using the Python API"
 DETID:    "Unique Sensor ID"
 READOUTB: "Readout Board ID"
 LEDWAVE:  "[nm] LED wavelength"

@@ -43,7 +43,7 @@ DEVICE_KEYS = ['V_EXTRA_HI', 'V_EXTRA_LO']
 # otherwise listed there
 DEVICES_DEFAULT_KEY = 'DEFAULT'
 
-PROTECTED_KEYS = ['USERNAME']
+PROTECTED_KEYS = ['USER']
 PROTECTED_KEYS += YAML_REQUIRED_KEYS
 PROTECTED_KEYS += TESTBED_REQUIRED_KEYS
 PROTECTED_KEYS += DEVICE_KEYS
@@ -117,7 +117,11 @@ class Camera:
 
         with open(userConfigFile, 'r') as file:
             config = yaml.safe_load(file)
-            
+
+        # Record who's actually running the script, as USER@HOSTNAME (not
+        # user-editable -- USER is a PROTECTED_KEY)
+        config['USER'] = f"{os.environ.get('USER')}@{socket.gethostname()}"
+
         # Check for required keys in user's config file
         for k in YAML_REQUIRED_KEYS:
             if k not in config.keys():
@@ -321,8 +325,8 @@ class Camera:
 
             DATE = datetime.today().strftime('%Y%m%d')
             self.config['OUTDIR'] = f"{self.config['DETID']}/{DATE}/"
-            self.config['USERNAME'] = os.getlogin()
-            
+
+
             # Circumvent FITSkey(), set all protected FITS headers
             for k,v in self.config.items(): self.send(f'fits_set {k} {v}')  
 
