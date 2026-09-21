@@ -186,6 +186,9 @@ BBX has an internal clock whose value (in seconds) is saved as TIMMISC_ in the F
 
 To convert the CDS-subtracted data to units of e-, multiply by the value in GAINFITS.  This is only approximate and does not account for nonlinearity.  Precise results require using the gain (e-/ADU) function from a PTC analysis for the detector.
 
+## Using LED flash
+
+The CMOS transfer gate acts as an electronic shutter.  For many applications (QE, PTC, etc.), you can leave the light source on, allow it to settle, and vary the amount of signal by changing the exposure time.  The timed LED flash `cam.expose_with_flash()` is only needed for measurements such as lag where we need a bright stimulus followed immediately by dark frames.
 
 ## License
 
