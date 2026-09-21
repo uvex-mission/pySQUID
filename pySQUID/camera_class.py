@@ -234,16 +234,36 @@ class Camera:
     def restartBBX(self, settle=0):
         '''Combination of _load() and _init().  Avoid using these separately.
 
-        settle:  Wait time (s) after reset before continuing
+        settle:  Wait time (s) after reset before continuing.
+        This can be cleanly interrupted with CTRL-C.
         '''
         _ = self._load()
         print(_)
         _ = self._init()
         print(_)
-        print(f'Settling after BBX reset, waiting {settle} sec...')
-        if not self.dryrun: time.sleep(settle)
+
+        # Start waiting while displaying time elapsed
+        print(f'Settling after BBX reset, waiting {settle} sec...  (CTRL-C to skip)')
+        elapsed = settle
+        if not self.dryrun:
+            start = time.time()
+            step = 5
+            remaining = settle
+            try:
+                while remaining > 0:
+                    chunk = min(step, remaining)
+                    time.sleep(chunk)
+                    remaining -= chunk
+                    elapsed = time.time() - start
+                    print(f'\r  ...{elapsed:.0f}/{settle} sec', end='', flush=True)
+            except KeyboardInterrupt:
+                elapsed = time.time() - start
+                print(f'\nSettle interrupted by user after {elapsed:.2f} sec')
+            else:
+                print()
         print('Done!')
-        self.FITSkey('TIMSETTL', settle)
+
+        self.FITSkey('TIMSETTL', elapsed)
 
         return _
 
@@ -275,6 +295,17 @@ class Camera:
             return self.send(f'fits_set {key} {setval}')
         else:
             return self.send(f'fits_get {key}')[0]
+
+    def FITSkeys(self, keys: dict):
+        '''Set multiple FITS headers from a dictionary of key/value pairs
+        Throws NotImplementedError if any key is protected
+        '''
+        for key in keys:
+            if key.upper() in PROTECTED_KEYS:
+                raise NotImplementedError(f'Changing {key} is prohibited: https://tinyurl.com/DNahahah')
+
+        for key, setval in keys.items():
+            self.FITSkey(key, setval)
 
     def FITSkey_clear(self, key: str | None=None):
         '''Clear user-defined FITS headers'''

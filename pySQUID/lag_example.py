@@ -2,7 +2,7 @@
 #
 # USAGE:  python lag_example.py
 
-# PROTIP: Run long scripts in 'screen' to avoid shutdown
+# PROTIP: Run long scripts in 'screen' to avoid accidental shutdown
 #		https://www.geeksforgeeks.org/linux-unix/screen-command-in-linux-with-examples/ 
 
 import numpy as np
@@ -69,8 +69,7 @@ cam.dryrun = DRYRUN  # If True, print commands instead of executing them
 
 cam.restartBBX(settle=TIMSETTL)  # Make sure BBX is in our default configuration
 
-for k, v in FITS_HEADERS.items(): cam.FITSkey(k,v)  # Load custom FITS headers
-
+cam.FITSkeys(FITS_HEADERS)  # Load custom FITS headers
 cam.filebase(FILEBASE)  # Set the output FITS filename base
 cam.imnum(I_START)      # Set the starting image number for filenaming
 
