@@ -1,6 +1,6 @@
 # Testbed settings for users to edit manually
 OPERATOR: cshapiro  # Who are you?
-TESTBED:  testbed11  # Which testbed station? 
+TESTBED:  testbed1  # Which testbed station? 
 
 DETID:    W08D02    # CMOS detector ID
 DETTYPE:  NUV       # UVEX detector type (FUV / NUV / LSS / ENG)
