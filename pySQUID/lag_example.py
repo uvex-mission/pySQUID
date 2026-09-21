@@ -76,8 +76,8 @@ cam.imnum(I_START)      	# Set the starting image number for filenaming
 cam.set_biases(BIASES)  	### Set bias voltages to non-defaults
 cam.set_NOGLO(NOGLO)    	# Set detector controller NOGLO mode
 
-cam.LED_MISC_ON()  			# Enable MISC LED switch
 cam.LED_OFF()      			# Start with LED power off
+cam.LED_MISC_ON()  			# Enable MISC LED switch
 
 # Clear detector
 cam.set_gain('HIGH')              # Switch detector to high gain mode
