@@ -1,3 +1,6 @@
+<img src="SQUID_logo.png" alt="Logo" width="400" align="right"> 
+<BR CLEAR=”left” /> 
+
 # pySQUID
 
 Control and data-reduction tools for SQUID (Server for Quick UVEX Image Data).
