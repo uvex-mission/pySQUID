@@ -67,7 +67,7 @@ GAINELX_NOM       = {'HIGH':1.1, 'LOW':1.1*7.1}   # Nominal gains e-/ADUe (elect
 LSB_DROP          = 3     # Number of least-significant bits to drop in binary to FITS conversion
 KSCALE            = 4     # Divide data by even integer to reduce file size; affects FITS gain (e-/ADU)
 
-PIPELINE_SCHEMA_VERSION = "1.0.0"
+PIPELINE_SCHEMA_VERSION = "2.0.0"  # bumped: DAC_VOLTAGE_KEYS now stored in volts, not raw DN
 
 VARIABLE_PARAMS = ["FRMCNT", "MSEC"]
 CONSTANT_PARAMS = [p for p in FRAME_HEADER_PARAM_NAMES if p not in VARIABLE_PARAMS]
@@ -87,6 +87,34 @@ def apply_keyword_comments(header):
     for key, comment in KEYWORD_COMMENTS.items():
         if key in header:
             header.comments[key] = comment
+
+def DAC_to_V(dac, key=None):
+    '''
+    Convert a raw DAC/ADC telemetry count to an approximate bias voltage.
+
+    The board reports an exact dac value -- it is preserved in the header comment (see
+    build_ext_header()) precisely because this conversion is not exact.
+    The slope below (3.76V / 768 DN) is a nominal calibration figure
+    shared across several bias channels.
+
+    Two channels apply additional scalings on top of the
+    base conversion -- pass the FITS keyword name to select the
+    right case:
+      - VLOW_TG: V = -0.243*V_base + 0.6   (inverted, level-shifted)
+      - V8OFFV:  V = max(2*V_base, 4.9)    (doubled, hits max)
+    All other keys (VLOW_ROW, VHIGH_TG, PIX_REF, VH_BIAS, V_EXTRA) use the
+    base conversion unmodified.
+    '''
+    slope = 3.76 / 768
+    v = dac * slope
+    if key == "VLOW_TG":
+        v = -0.243 * v + 0.6
+    elif key == "V8OFFV":
+        v = max(2 * v, 4.9)
+    return v
+
+# Frame-telemetry keys reported as bias DAC counts; stored in volts as of schema 2.0.0
+DAC_VOLTAGE_KEYS = {"VLOW_ROW", "VLOW_TG", "VHIGH_TG", "PIX_REF", "VH_BIAS", "V_EXTRA", "V8OFFV"}
 
 # ---------------------------------------------------------------------------
 # TDMS reading
@@ -347,6 +375,8 @@ def build_ext_header(hdu, exp_idx, is_complete, num_scans,
             h['PICO_DES'] = get_pico_desc(pico_ver)
             h['X_ORDER']  = x_order
             h['X_ORDERD'] = get_xorder_desc(x_order)
+        elif name in DAC_VOLTAGE_KEYS:
+            h[name[:8]] = (round(DAC_to_V(val, key=name), 4), f'[V] Board Param: {name} (raw DN={val})')
         else:
             h[name[:8]] = (val, f'Board Param: {name}')
 
