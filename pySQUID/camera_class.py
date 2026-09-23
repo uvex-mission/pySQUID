@@ -43,7 +43,7 @@ DEVICE_KEYS = ['V_EXTRA_HI', 'V_EXTRA_LO']
 # otherwise listed there
 DEVICES_DEFAULT_KEY = 'DEFAULT'
 
-PROTECTED_KEYS = ['USER']
+PROTECTED_KEYS = ['USER', 'SUBDIR']
 PROTECTED_KEYS += YAML_REQUIRED_KEYS
 PROTECTED_KEYS += TESTBED_REQUIRED_KEYS
 PROTECTED_KEYS += DEVICE_KEYS
@@ -174,6 +174,12 @@ class Camera:
 
         # Naming convention
         self.send('set name_format standard')  # standard "basename_0000" | procedure "DATETIME_filename_0000"
+
+        # Set output directory (below server home) to ../DEVICE/TESTBED/DATE
+        # We don't provide this as a helper function - we don't want people setting it arbitrarily
+        subdir = '/'.join(config['DETID'], config['TESTBED'], datetime.now().strftime("%y%m%d")) # YYMMDD
+        self.FITSkey('SUBDIR', subdir)
+        self.send(f'subdir {subdir}')
 
 
     def send(self, cmd, **kwargs):
