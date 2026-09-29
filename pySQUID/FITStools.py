@@ -223,3 +223,113 @@ def compute_cds_histogram(row, roi=None, verbose=False, gainfits=False, **kwargs
     img = get_cds_image(row, roi=roi, verbose=verbose, gainfits=gainfits)
     hist = np.histogram(img, **kwargs)
     return hist[0]
+
+
+def _diff_dtype(dtype1, dtype2):
+    '''
+    Choose an output dtype for the difference of two arrays with dtypes
+    dtype1 and dtype2 such that the result: (a) can represent negative
+    values, (b) is never unsigned, and (c) is the smallest type that still
+    encompasses the value ranges of both inputs. Integer inputs stay
+    integer; any floating-point input (or any other non-integer numeric
+    type) falls back to float32.
+    '''
+    dtype1 = np.dtype(dtype1)
+    dtype2 = np.dtype(dtype2)
+
+    if not (np.issubdtype(dtype1, np.integer) and np.issubdtype(dtype2, np.integer)):
+        # Float (or other non-integer numeric) inputs: float32 is sufficient
+        return np.dtype(np.float32)
+
+    promoted = np.promote_types(dtype1, dtype2)
+
+    if np.issubdtype(promoted, np.unsignedinteger):
+        # An unsigned type can't hold a negative difference, and can't even
+        # hold its own full range once signed. Bump to the next-larger
+        # signed integer type (capped at int64, the largest numpy offers).
+        next_bits = min(promoted.itemsize * 2, 8) * 8
+        return np.dtype(f'int{next_bits}')
+
+    return promoted  # already a signed integer type, and big enough
+
+
+def diff_hdulists(hdulist1, hdulist2, keys=None):
+    '''
+    Compute the extension-wise difference (hdulist1 - hdulist2) of two
+    HDULists and return it as a new HDUList.
+
+    Both HDULists must have the same number of extensions, and the data
+    array in each extension of hdulist1 must have the same shape as the
+    corresponding array in hdulist2. If given, `keys` is a list of FITS
+    header keywords whose values must match exactly, extension-wise,
+    between the two HDULists (e.g. ['NAXIS1', 'NAXIS2']). The comparison
+    treats a key missing from both headers as a match.
+
+    The whole method fails (raises ValueError) if there is a data shape
+    mismatch, a missing-data mismatch, or a header key mismatch in even one
+    extension -- nothing is written until every extension has been checked.
+
+    For each extension, the output data is data1 - data2. If an extension's
+    data is None in both inputs (e.g. a header-only Primary HDU), the data
+    is left as None (kept from hdulist1) rather than diffed. All FITS
+    headers in the output are copied from hdulist1, with a HISTORY card
+    "Subtracted: FILENAME" appended (FILENAME taken from the corresponding
+    hdulist2 extension's header, if that key is present there).
+
+    The output data type is always signed (never unsigned) so that negative
+    differences are representable, and is chosen to be the smallest
+    integer type that encompasses both input types; if either input is
+    floating-point, the output is float32.
+    '''
+    keys = keys or []
+
+    if len(hdulist1) != len(hdulist2):
+        raise ValueError(
+            f"HDULists have different numbers of extensions: "
+            f"{len(hdulist1)} vs {len(hdulist2)}"
+        )
+
+    # Validate every extension before building any output, so the whole
+    # method fails together if even one extension is mismatched.
+    for i, (hdu1, hdu2) in enumerate(zip(hdulist1, hdulist2)):
+        data1, data2 = hdu1.data, hdu2.data
+
+        if (data1 is None) != (data2 is None):
+            raise ValueError(
+                f"Extension {i}: data is present in one HDUList but not "
+                f"the other"
+            )
+        if data1 is not None and data1.shape != data2.shape:
+            raise ValueError(
+                f"Extension {i}: data shape mismatch: "
+                f"{data1.shape} vs {data2.shape}"
+            )
+        for key in keys:
+            v1 = hdu1.header.get(key, None)
+            v2 = hdu2.header.get(key, None)
+            if v1 != v2:
+                raise ValueError(
+                    f"Extension {i}: header key {key!r} mismatch: "
+                    f"{v1!r} vs {v2!r}"
+                )
+
+    # All checks passed -- build the diffed HDUList
+    out_hdus = []
+    for hdu1, hdu2 in zip(hdulist1, hdulist2):
+        data1 = hdu1.data
+        header = hdu1.header.copy()
+
+        if data1 is None:
+            # Not an image (e.g. header-only Primary HDU): keep hdulist1's data
+            out_data = None
+        else:
+            out_dtype = _diff_dtype(data1.dtype, hdu2.data.dtype)
+            out_data = data1.astype(out_dtype) - hdu2.data.astype(out_dtype)
+
+        filename2 = hdu2.header.get('FILENAME', None)
+        if filename2 is not None:
+            header.add_history(f"Subtracted: {filename2}")
+
+        out_hdus.append(type(hdu1)(data=out_data, header=header))
+
+    return pf.HDUList(out_hdus)

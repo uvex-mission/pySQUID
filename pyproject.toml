@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pySQUID"
-version = "0.2.0"
+version = "0.1.0"
 description = "Control and data-reduction tools for the UVEX SQUID camera testbed"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -46,6 +46,7 @@ dev = [
 cds = "pySQUID.cdssubtract_BBx:main"
 tdms = "pySQUID.tdms_to_fits:main"
 fits_table = "pySQUID.fits_table:main"
+subtract_fits = "pySQUID.subtract_fits:main"
 
 [tool.setuptools]
 # Explicit package list (this is a flat layout: the pySQUID/ package
