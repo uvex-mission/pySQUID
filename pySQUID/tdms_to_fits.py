@@ -7,29 +7,40 @@
 # converted to FITS directly.
 #
 # Usage:
-#   tdms_to_fits.py <input_basename> [options]
+#   tdms_to_fits.py <input_basename> [<input_basename> ...] [options]
 #
 # Arguments:
-#   input_basename   Base path of the TDMS file (with or without .tdms extension),
-#                    or path to a previously-saved .bin file.
-#                    Split TDMS files (<base>_0001.tdms, etc.) are included automatically.
+#   input_basename   One or more base paths of TDMS files (with or without .tdms
+#                    extension), paths to previously-saved .bin files, and/or glob
+#                    patterns (e.g. '2026-09-*.tdms') matching several recordings.
+#                    Split TDMS files (<base>_0001.tdms, etc.) are included automatically
+#                    for each recording. A pattern match is only treated as a split-file
+#                    continuation -- and excluded from being its own recording -- if the
+#                    corresponding un-suffixed base .tdms file also exists on disk.
+#                    If more than one recording resolves, runs in batch mode: each
+#                    recording is processed independently and a failure in one does not
+#                    abort the others.
 #
 # Options:
 #   --outdir DIR     Output directory for .fits (and optionally .bin) files.
 #                    Default: same directory as input.
 #   --metadata FILE  Path to .yaml metadata file.
-#                    Default: <input_basename>.yaml if it exists.
+#                    Default: <input_basename>.yaml per recording, if it exists.
+#                    If given, this single file is used for every recording in the run.
 #   --bin            Also save the intermediate .bin file (TDMS input only).
 #   --bin-only       Save .bin file only; do not convert to FITS (TDMS input only).
 #   --exposures N    Process only the first N exposures.
 #   --fast           Reuse block structure from exposure 0 for all subsequent exposures.
 #   --stream         Low-memory mode: write each exposure to FITS as it is built.
 #                    Implies --fast.
+#   --dryrun         Show how inputs map to recordings and output FITS files, which
+#                    outputs would be skipped, and which .yaml metadata file (if any)
+#                    would be applied to each, without processing anything.
+#   --no-overwrite   Skip a recording if its output .fits file already exists in --outdir.
 #
 # Examples:
-#   tdms_to_fits.py /data/myrecording --outdir /data/output --fast
-#   tdms_to_fits.py /data/myrecording --bin-only --outdir /data/bin_output
 #   tdms_to_fits.py /data/myrecording.bin --fast
+#   tdms_to_fits.py '/data/2026-09-*.tdms' --outdir /data/output --no-overwrite
 
 ### TODOS:
 # DATETIME header from server
@@ -38,6 +49,7 @@
 from collections import namedtuple
 import sys
 import os
+import re
 import glob
 import argparse
 import tempfile
@@ -130,6 +142,90 @@ def collect_tdms_files(base_path):
         raise FileNotFoundError(f"Base TDMS file not found: {primary}")
     split_files = sorted(glob.glob(base_path + "_[0-9][0-9][0-9][0-9].tdms"))
     return base_path, [primary] + split_files
+
+
+# ---------------------------------------------------------------------------
+# Batch input resolution (glob patterns / multiple recordings)
+# ---------------------------------------------------------------------------
+
+_GLOB_MAGIC_RE = re.compile(r'[*?\[]')
+
+def has_glob_magic(s):
+    """True if s contains shell-glob wildcard characters."""
+    return bool(_GLOB_MAGIC_RE.search(s))
+
+
+# A split-part filename ends in exactly 4 digits after an underscore (matches
+# the glob pattern collect_tdms_files uses: "_[0-9][0-9][0-9][0-9].tdms").
+_SPLIT_SUFFIX_RE = re.compile(r'^(.*)_(\d{4})$')
+
+
+def filter_primaries(tdms_paths):
+    """
+    Given .tdms file paths -- from a glob match OR from literal CLI args
+    (importantly, including args the *shell* already expanded from an
+    unquoted wildcard, e.g. `tdms_to_fits.py tmp/*.tdms` with no quotes:
+    Python never sees the pattern, only the resulting list of literal
+    filenames) -- drop any that are split continuations and return the
+    sorted list of primary recording base paths (no .tdms extension).
+    Callers de-duplicate the result themselves, since specs from other
+    sources (literal non-.tdms args) may need to be merged in too.
+
+    A path is treated as a split continuation -- and excluded here -- only
+    if the corresponding un-suffixed base .tdms file also exists on disk;
+    otherwise it's an independent recording in its own right (e.g.
+    LEDtest_0001.tdms and LEDtest_0002.tdms with no LEDtest.tdms present are
+    two separate recordings, not two parts of one). Continuations are picked
+    back up automatically by collect_tdms_files() once their primary is
+    processed, so they don't need to appear in the output here themselves.
+    """
+    primaries = []
+    for m in sorted(tdms_paths):
+        stripped = m[:-5]  # strip ".tdms" (every path here is expected to end in it)
+        suffix_match = _SPLIT_SUFFIX_RE.match(stripped)
+        if suffix_match and os.path.exists(suffix_match.group(1) + ".tdms"):
+            continue  # split continuation; its primary is handled on its own
+        primaries.append(stripped)
+    return primaries
+
+
+def resolve_inputs(input_args):
+    """
+    Resolve CLI input tokens -- literal basenames/.bin paths and/or glob
+    patterns -- to a de-duplicated list of recording specs ready to hand to
+    process_one_recording().
+
+    Every .tdms path -- whether it came from a quoted glob pattern expanded
+    by this function, or arrived as a literal argument (including one the
+    *shell* already expanded from an unquoted wildcard) -- goes through the
+    same split-continuation filter, so the result is the same either way.
+    """
+    tdms_candidates = []  # .tdms paths still needing the split-continuation filter
+    literal_specs = []    # bare basenames / .bin paths, trusted as-is
+
+    for arg in input_args:
+        arg = arg.rstrip("/")
+        if has_glob_magic(arg):
+            matches = [p for p in glob.glob(arg)
+                       if os.path.isfile(p) and p.lower().endswith(".tdms")]
+            if not matches:
+                print(f"WARNING: Pattern matched no recordings: {arg}")
+            tdms_candidates.extend(matches)
+        elif arg.lower().endswith(".tdms"):
+            tdms_candidates.append(arg)
+        else:
+            literal_specs.append(arg)
+
+    resolved = filter_primaries(tdms_candidates) + literal_specs
+
+    seen = set()
+    deduped = []
+    for spec in resolved:
+        key = os.path.abspath(spec)
+        if key not in seen:
+            seen.add(key)
+            deduped.append(spec)
+    return deduped
 
 
 def read_tdms_segment_data(tdms_path, out_file):
@@ -259,7 +355,7 @@ def assign_scan_indices(rows, cols, num_scans):
         print(f"Data contains {int(sorted_scan_idx[bad])+1} hits for this pixel, "
               f"but YAML configured num_scans={num_scans}.")
         print("Please update 'num_scans' in your YAML to match the experiment format.")
-        sys.exit(1)
+        raise RuntimeError("Overscan detected — see message above for details.")
     return sorted_scan_idx[np.argsort(sort_order)]
 
 
@@ -570,25 +666,160 @@ def convert_to_fits(raw_data, source_name, yaml_path, output_dir,
     except Exception as e:
         print(f"Error: {e}")
         import traceback; traceback.print_exc()
-        sys.exit(1)
+        raise
 
 
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
+RecordingPlan = namedtuple('RecordingPlan', [
+    'input_files',   # [tdms files...] or [the .bin file]
+    'base_name',     # recording base name, no extension
+    'input_dir',     # directory the input(s) live in
+    'out_dir',       # resolved output directory
+    'output_path',   # the .fits path (or .bin path, if --bin-only)
+    'skip',          # True if --no-overwrite applies and the output is already there
+    'is_bin_only',   # True if this recording will only produce a .bin, no .fits
+    'is_bin_input',  # True if the input itself is already a .bin file
+])
+
+
+def plan_recording(input_arg, args):
+    """
+    Resolve a recording spec (literal basename or .bin path) to a
+    RecordingPlan, without reading any TDMS/bin data. Raises the same
+    exceptions actual processing would raise at the resolution stage
+    (e.g. FileNotFoundError for a missing base).
+
+    Used both by process_one_recording() (to decide what to actually do)
+    and by --dryrun (to report it without doing it), so the two can't drift.
+    """
+    input_arg = input_arg.rstrip("/")
+    is_bin_input = input_arg.lower().endswith(".bin")
+
+    if is_bin_input:
+        if not os.path.exists(input_arg):
+            raise FileNotFoundError(f".bin file not found: {input_arg}")
+        base_name   = os.path.splitext(os.path.basename(input_arg))[0]
+        input_dir   = os.path.dirname(os.path.abspath(input_arg))
+        input_files = [input_arg]
+    else:
+        base_path, input_files = collect_tdms_files(input_arg)
+        base_name = os.path.basename(base_path)
+        input_dir = os.path.dirname(os.path.abspath(base_path))
+
+    out_dir     = args.outdir if args.outdir else input_dir
+    is_bin_only = args.bin_only and not is_bin_input
+
+    if is_bin_only:
+        # --bin-only never produces a .fits, so --no-overwrite (which only
+        # guards the FITS output) doesn't apply to this recording.
+        output_path = os.path.join(out_dir, base_name + ".bin")
+        skip        = False
+    else:
+        output_path = os.path.join(out_dir, base_name + ".fits")
+        skip        = args.no_overwrite and os.path.exists(output_path)
+
+    return RecordingPlan(input_files, base_name, input_dir, out_dir,
+                          output_path, skip, is_bin_only, is_bin_input)
+
+
+def resolve_yaml_path(plan, args):
+    """
+    Resolve which .yaml metadata file applies to a recording, the same way
+    process_one_recording() does before handing off to convert_to_fits().
+
+    Returns (yaml_path, source):
+      - ("override", path)  from --metadata; always used as-is even if the
+        path doesn't exist on disk (convert_to_fits() warns and falls back
+        to no FITS headers in that case -- this just lets --dryrun flag it).
+      - ("auto", path)      found via <base_name>.yaml next to the input.
+      - ("missing", None)   no --metadata given and no <base_name>.yaml present.
+    """
+    if args.metadata is not None:
+        return "override", args.metadata
+    candidate = os.path.join(plan.input_dir, plan.base_name + ".yaml")
+    if os.path.exists(candidate):
+        return "auto", candidate
+    return "missing", None
+
+
+def process_one_recording(input_arg, args):
+    """
+    Run the full TDMS/.bin -> FITS pipeline for a single recording.
+
+    Returns a short status string: "converted", "bin-only", or "skipped".
+    Raises on failure -- the caller decides whether to isolate the failure
+    (batch mode) or let it propagate (single-recording mode).
+    """
+    fast   = args.fast
+    stream = args.stream
+
+    input_arg = input_arg.rstrip("/")
+    plan = plan_recording(input_arg, args)
+
+    if plan.skip:
+        print(f"### Skipping {plan.base_name}: {plan.output_path} already exists.")
+        return "skipped"
+
+    # ------------------------------------------------------------------
+    # Produce raw_data.  The two branches differ only in how the binary
+    # data is obtained; everything after this block is shared regardless
+    # of whether we started from TDMS or .bin.
+    # ------------------------------------------------------------------
+    if plan.is_bin_input:
+        # --- .bin input: skip TDMS conversion entirely ---
+        if args.bin or args.bin_only:
+            print("Warning: --bin and --bin-only are ignored when the input is already a .bin file.")
+        print(f"### Reading .bin file: {input_arg}")
+        raw_data = np.memmap(input_arg, dtype=np.uint8, mode='r')
+
+    else:
+        # --- TDMS input: collect files, optionally write .bin ---
+        print(f"### Found {len(plan.input_files)} TDMS file(s):")
+        for f in plan.input_files:
+            print(f"    {f}")
+
+        bin_path = (os.path.join(plan.out_dir, plan.base_name + ".bin")
+                    if (args.bin or args.bin_only) else None)
+
+        print(f"### Reading TDMS data...")
+        raw_data = tdms_to_raw(plan.input_files, bin_path=bin_path)
+        if args.bin_only:
+            print(f"### Done. Binary file: {bin_path}")
+            return "bin-only"
+
+        if bin_path:
+            print(f"### Binary file saved: {bin_path}")
+
+    os.makedirs(plan.out_dir, exist_ok=True)
+
+    # A user-supplied --metadata file applies to every recording in the run;
+    # otherwise each recording auto-detects its own <base_name>.yaml.
+    _, yaml_path = resolve_yaml_path(plan, args)
+
+    print(f"### Converting to FITS...")
+    convert_to_fits(raw_data, plan.base_name, yaml_path, plan.out_dir,
+                    args.max_exposures, fast, stream, args.skip)
+    return "converted"
+
+
 def main():
     parser = argparse.ArgumentParser(
         description=(
-            "Convert split TDMS files (or a previously-saved .bin file) "
-            "to a FITS image sequence."
+            "Convert split TDMS files (or previously-saved .bin files) "
+            "to FITS image sequences. Accepts multiple recordings and/or "
+            "glob patterns to batch-process several recordings in one run."
         )
     )
     parser.add_argument(
-        "input_basename",
+        "input_basenames",
+        nargs="+",
         help=(
-            "Base path of the TDMS file (with or without .tdms extension), "
-            "or path to a .bin file produced by a prior --bin / --bin-only run."
+            "One or more base paths of TDMS files (with or without .tdms extension), "
+            "paths to .bin files, and/or glob patterns (e.g. '2026-09-*.tdms') matching several recordings. "
+            "If both <base>.tdms and <base>_0001.tdms exist, these (and additional matches) are treated as a split-file."
         )
     )
     parser.add_argument(
@@ -597,7 +828,10 @@ def main():
     )
     parser.add_argument(
         "--metadata", "-m", default=None,
-        help="Path to .yaml metadata file (default: <input_basename>.yaml if present)."
+        help=(
+            "Path to .yaml metadata file. Default: <input_basename>.yaml per "
+            "recording.  If given, this single file overrides the per-recording lookup."
+        )
     )
     parser.add_argument(
         "--bin", action="store_true",
@@ -623,68 +857,86 @@ def main():
         "--stream", action="store_true",
         help="Low-memory mode: write each exposure to FITS as it is built."
     )
+    parser.add_argument(
+        "--dryrun", action="store_true",
+        help=(
+            "Show how inputs map to output FITS files without processing anything."
+        )
+    )
+    parser.add_argument(
+        "--no-overwrite", action="store_true",
+        help="Skip a recording if its output .fits file already exists in --outdir."
+    )
     args = parser.parse_args()
 
-    fast   = args.fast #or args.stream
-    stream = args.stream
+    recordings = resolve_inputs(args.input_basenames)
+    if not recordings:
+        print("Error: no recordings matched the given input(s).")
+        sys.exit(1)
 
-    input_arg = args.input_basename.rstrip("/")
+    if args.dryrun:
+        print(f"### {len(recordings)} recording(s) resolved:")
+        n_skip = 0
+        for rec in recordings:
+            try:
+                plan = plan_recording(rec, args)
+            except Exception as e:
+                print(f"\n  {rec}")
+                print(f"      ERROR: {e}")
+                continue
+            if plan.skip:
+                n_skip += 1
+                header_note = "  [SKIP: already exists]"
+            elif plan.is_bin_only:
+                header_note = "  (--bin-only: no .fits produced)"
+            else:
+                header_note = ""
+            print(f"\n  {plan.output_path}{header_note}")
+            for f in plan.input_files:
+                print(f"      {f}")
+            if not plan.is_bin_only:
+                yaml_source, yaml_path = resolve_yaml_path(plan, args)
+                if yaml_source == "missing":
+                    print(f"      yaml: [NONE]")
+                elif yaml_source == "override" and not os.path.exists(yaml_path):
+                    print(f"      yaml: {yaml_path}  [MISSING]")
+                else:
+                    print(f"      yaml: {yaml_path}")
+        print(f"\n### {len(recordings)} recording(s) total, {n_skip} would be skipped.")
+        return
 
-    # ------------------------------------------------------------------
-    # Produce raw_data and base_name.  The two branches differ only in
-    # how the binary data is obtained; everything after this block is
-    # shared regardless of whether we started from TDMS or .bin.
-    # ------------------------------------------------------------------
-    if input_arg.lower().endswith(".bin"):
-        # --- .bin input: skip TDMS conversion entirely ---
-        if not os.path.exists(input_arg):
-            print(f"Error: .bin file not found: {input_arg}")
-            sys.exit(1)
-        if args.bin or args.bin_only:
-            print("Warning: --bin and --bin-only are ignored when the input is already a .bin file.")
+    if len(recordings) == 1:
+        # Single recording: run the pipeline directly. On error, let the
+        # exception propagate and crash normally -- identical behavior to
+        # this script's original single-recording-only usage.
+        process_one_recording(recordings[0], args)
+        return
 
-        base_name = os.path.splitext(os.path.basename(input_arg))[0]
-        input_dir = os.path.dirname(os.path.abspath(input_arg))
-        print(f"### Reading .bin file: {input_arg}")
-        raw_data  = np.memmap(input_arg, dtype=np.uint8, mode='r')
+    # Batch mode: isolate failures per recording so one bad recording
+    # doesn't abort the whole run. KeyboardInterrupt is deliberately not
+    # caught here, so Ctrl+C still aborts the entire batch immediately.
+    converted, skipped, failed = [], [], []
+    for i, rec in enumerate(recordings, 1):
+        print(f"\n=== [{i}/{len(recordings)}] {rec} ===")
+        try:
+            status = process_one_recording(rec, args)
+        except Exception as e:
+            print(f"### FAILED: {rec}: {e}")
+            import traceback; traceback.print_exc()
+            failed.append((rec, str(e)))
+            continue
+        if status == "skipped":
+            skipped.append(rec)
+        else:
+            converted.append(rec)
 
-    else:
-        # --- TDMS input: collect files, optionally write .bin ---
-        base_path, all_files = collect_tdms_files(input_arg)
-        base_name = os.path.basename(base_path)
-        input_dir = os.path.dirname(os.path.abspath(base_path))
+    print(f"\n=== Batch summary: {len(converted)} converted, "
+          f"{len(skipped)} skipped, {len(failed)} failed (of {len(recordings)}) ===")
+    for rec, err in failed:
+        print(f"    FAILED: {rec}: {err}")
 
-        print(f"### Found {len(all_files)} TDMS file(s):")
-        for f in all_files:
-            print(f"    {f}")
-
-        # out_dir is needed for bin_path, so resolve it here before the
-        # early return so --bin-only can write to the right place.
-        out_dir  = args.outdir if args.outdir else input_dir
-        bin_path = os.path.join(out_dir, base_name + ".bin") if (args.bin or args.bin_only) else None
-
-        print(f"### Reading TDMS data...")
-        raw_data = tdms_to_raw(all_files, bin_path=bin_path)
-        if args.bin_only:
-            print(f"### Done. Binary file: {bin_path}")
-            return
-
-        if bin_path:
-            print(f"### Binary file saved: {bin_path}")
-
-    # Resolve output directory, YAML, then convert to FITS.
-    out_dir = args.outdir if args.outdir else input_dir
-    os.makedirs(out_dir, exist_ok=True)
-
-    yaml_path = args.metadata
-    if yaml_path is None:
-        candidate = os.path.join(input_dir, base_name + ".yaml")
-        if os.path.exists(candidate):
-            yaml_path = candidate
-
-    print(f"### Converting to FITS...")
-    convert_to_fits(raw_data, base_name, yaml_path, out_dir,
-                    args.max_exposures, fast, stream, args.skip)
+    if failed:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

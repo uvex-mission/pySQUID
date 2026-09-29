@@ -159,6 +159,11 @@ or if the .bin file already exists
 ```bash
 tdms path/to/basename.bin --fast  # Alongside basename.yaml
 ```
+Batch processing:
+```bash
+tdms path/to/basename*.tdms --fast  # Automatically groups split TDMS files and YAML files
+tdms path/to/basename*.tdms --fast  --dryrun  # Summarize expected output only
+```
 You can take advantage of bifrost's multiple cores:
 ```bash
 for bfile in *.bin; do tdms bfile --fast & done  # Using '&' starts the jobs in the background on separate cores
