@@ -24,6 +24,7 @@ classifiers = [
 dependencies = [
   "numpy",
   "astropy",
+  "pandas",
   "PyYAML",
   "npTDMS",
   "ipython",
@@ -44,6 +45,7 @@ dev = [
 # executables for these on install, backed by real Python callables.
 cds = "pySQUID.cdssubtract_BBx:main"
 tdms = "pySQUID.tdms_to_fits:main"
+fits_table = "pySQUID.fits_table:main"
 
 [tool.setuptools]
 # Explicit package list (this is a flat layout: the pySQUID/ package
