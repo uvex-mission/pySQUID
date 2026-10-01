@@ -31,7 +31,8 @@ try:
     camera = camera_class.Camera('$USERCONFIG')
     print()
     camera_class.SQUID_logo()
-    print('Setup complete. Try help(camera) for a list of commands, e.g. camera.ping()')
+    print('Setup complete. Try help(camera) for a list of commands')
+    print('Typically start with camera.restartBBX()')
     cam = camera
 
 except Exception as e:

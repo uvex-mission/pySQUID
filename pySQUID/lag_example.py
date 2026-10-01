@@ -10,11 +10,11 @@ import sys
 import time
 from pySQUID import camera_class  # Camera class for talking to the SQUID testbed server
 
-DRYRUN = True  	# DRYRUN=True means just print the commands, don't execute them
+DRYRUN = input('Is this a DRYRUN?  [Y]/N:  ').upper()!='N'  # DRYRUN just prints commands without executing
 
 USERCONFIG = '/disk/bifrost/uvexdet/pySQUID/pySQUID/USER.yaml'  # User's config file
 FILEBASE = 'lagtime0'  # Test name for filenames
-I_START = 0  	# Starting filename tag number --> lagtime0_0000
+# I_START = 0  	# Starting filename tag number ; skip to guard against filename collisions
 
 TIMSETTL = 600  # Wait time (s) after BBX reset to allow settling (use for precision measurements)
 				# Unclear what this value should be - it is based the older Archon controller and VIB
@@ -37,8 +37,7 @@ NOGLO = 14  			# The best NOGLO mode is typically 14
 # Include 0V as baseline measurement with same timing
 VLED = (0, 6.0)
 EXPTIME_FLASH_S = 45	# Duration of exposure containing the flash
-DELAY_FLASH_S = 12 		# Delay before flash start
-FLASH_S = 24 			# Flash duration
+FLASH_S = 24 			# Flash duration; must be < exposure to avoid light during readout
 
 NEXP_DARK = 12  		# Number of exposures after LED flash
 DARKTIME_S = 300  		# Dark duration (s)
@@ -46,14 +45,6 @@ DARKTIME_S = 300  		# Dark duration (s)
 # np.random.shuffle(DARKTIMES_S)  # Randomize to disrupt trends
 
 #------- END OF HARDCODED PARAMETERS -------#
-
-# Estimate run time
-scantime = camera_class.SCANTIME_S
-t_estimate = DARKTIME_S*NEXP_DARK + scantime*(NEXP_DARK+1) + (EXPTIME_FLASH_S+2*scantime)
-t_estimate *= len(VLED)
-t_estimate += TIMSETTL
-t_estimate /= 3600.
-print(f'Estimated run time:  {round(t_estimate,1)} hours')
 
 #------- START TEST -------#
 t0 = time.time()
@@ -71,7 +62,7 @@ cam.restartBBX(settle=TIMSETTL)  # Make sure BBX is in our default configuration
 
 cam.FITSkeys(FITS_HEADERS)  # Load custom FITS headers
 cam.filebase(FILEBASE)  	# Set the output FITS filename base
-cam.imnum(I_START)      	# Set the starting image number for filenaming
+# cam.imnum(I_START)      	# Set the starting image number for filenaming
 
 cam.set_biases(BIASES)  	### Set bias voltages to non-defaults
 cam.set_NOGLO(NOGLO)    	# Set detector controller NOGLO mode
@@ -87,8 +78,8 @@ print( cam.expose(0,NEXP_DARK) )  # Take NEXP_DARK zero-second clearing exposure
 for vled in VLED:
 
 	# Single exposure with flash # exptime, volts, delay_on, Flash duration
-	cam.set_gain('LOW')                                                       # Switch detector to low gain mode
-	_ = cam.expose_with_flash(EXPTIME_FLASH_S, vled, DELAY_FLASH_S, FLASH_S)  # Expose with a timed LED flash
+	cam.set_gain('LOW')                                         # Switch detector to low gain mode
+	_ = cam.expose_with_flash(EXPTIME_FLASH_S, vled, FLASH_S)  	# Expose with a timed LED flash
 	print(_)
 
 	# Darks to watch lag decay;  0th image will contain ~1 frame time of lag
@@ -99,7 +90,8 @@ for vled in VLED:
 cam.FITSkey_clear()  # Clear user-defined FITS headers
 print('DONE!\n')
 
+# Summarize test timing
 t1 = time.time()
-t_actual = (t1-t0)/3600.
-print(f'Estimated run time:  {round(t_estimate,2)} hours')
-print(f'Actual run time:     {round(t_actual,2)} hours')
+t_actual = (t1-t0)
+print(f'Estimated run time:  {round(cam.timetotal/3600,2)} hours')
+print(f'Actual run time:     {round(t_actual/3600,2)} hours')

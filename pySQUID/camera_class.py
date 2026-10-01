@@ -4,6 +4,7 @@ Class for sending commands to the camera server
 '''
 
 # TODO: Print/recover default bias settings
+# Update hardcoded overhead timing estimate
 # Get safe bias ranges
 # Fix timeouts -- have some short default for all commands except exposures
 # UNTESTED: set_hardware_window <start row> <end row>
@@ -20,11 +21,19 @@ TO_DEFAULT = 3 # Default timeout (s) for server connections and commands
 # Safety limits; ### TBC
 VMIN, VMAX = (0,3.3)
 
-
 NICARD_DELAY = 2.   # Delay between sending "expose" and start of 1st frame scan
-SCANTIME_S   = 8.5  # Aproximate FULL-FRAME scan time ### LOW GAIN 6s
-MARGIN_S     = 1.
-FLASH_DELAY_S = NICARD_DELAY+SCANTIME_S+MARGIN_S # Minimum delay before flashing LED
+WRITE_DELAY_S = 11. # Overhead to write data file
+SCANTIME_S   = 12.5  # Aproximate FULL-FRAME scan time ### Different for each mode
+MARGIN_S     = 2
+
+TT_RESTART_S = 10  # Approx time to restart BBX
+TT_LEDSTATE_S = 1  # Approx time to get LED state
+
+### This needs to come from a table of known modes and properties
+def overhead(nexp, mode=None):
+    ''' Estimate overhead (s) for an exposure series'''
+    t = 12.5*(nexp+1) + 13
+    return t
 
 # Can't proceed unless these exist in user's config file
 YAML_REQUIRED_KEYS = ['OPERATOR', 'TESTBED', 'DETID', 'DETTYPE', 'DETCTRL', 'LEDWAVE']
@@ -162,6 +171,8 @@ class Camera:
         self.v_extra_hi = float(config['V_EXTRA_HI'])
         self.v_extra_lo = float(config['V_EXTRA_LO'])
         self.dryrun = False
+        self.timetotal = 0  # Estimate of total time (s) spent on commands
+                            # useful to predict test length with dryrun=True
 
         assert self.ping()  # Returns True if connected
         print('connected')
@@ -177,9 +188,8 @@ class Camera:
 
         # Set output directory (below server home) to ../DEVICE/TESTBED/DATE
         # We don't provide this as a helper function - we don't want people setting it arbitrarily
-        subdir = '/'.join(config['DETID'], config['TESTBED'], datetime.now().strftime("%y%m%d")) # YYMMDD
-        self.FITSkey('SUBDIR', subdir)
-        self.send(f'subdir {subdir}')
+        subdir = '/'.join( [config['DETID'], config['TESTBED'], datetime.now().strftime("%y%m%d")] ) # YYMMDD
+        # self.send(f'subdir {subdir}')
 
 
     def send(self, cmd, **kwargs):
@@ -241,7 +251,35 @@ class Camera:
         '''This starts the MISC running.  Multiple calls after load() may crash the system.'''
         return self.send('init')
 
-    def restartBBX(self, settle=0):
+    def sleep(self, delay):
+        '''Sleep for `delay` seconds, printing time elapsed as it progresses.
+
+        Gracefully handles KeyboardInterrupt (CTRL-C skips the remaining
+        wait).  Returns the actual elapsed time (s), whether the sleep
+        completed in full or was interrupted early.
+        '''
+        print(f'Waiting {delay} sec...  (CTRL-C to skip)')
+        elapsed = delay
+        if not self.dryrun:
+            start = time.time()
+            step = 5
+            remaining = delay
+            try:
+                while remaining > 0:
+                    chunk = min(step, remaining)
+                    time.sleep(chunk)
+                    remaining -= chunk
+                    print(f'\r  ...{time.time() - start:.0f}/{delay} sec', end='', flush=True)
+            except KeyboardInterrupt:
+                elapsed = time.time() - start
+                print(f'\nSleep interrupted by user after {elapsed:.2f} sec')
+            else:
+                print()
+        print('Done!')
+
+        return elapsed
+
+    def restartBBX(self, settle=10):
         '''Combination of _load() and _init().  Avoid using these separately.
 
         settle:  Wait time (s) after reset before continuing.
@@ -252,28 +290,12 @@ class Camera:
         _ = self._init()
         print(_)
 
-        # Start waiting while displaying time elapsed
-        print(f'Settling after BBX reset, waiting {settle} sec...  (CTRL-C to skip)')
-        elapsed = settle
-        if not self.dryrun:
-            start = time.time()
-            step = 5
-            remaining = settle
-            try:
-                while remaining > 0:
-                    chunk = min(step, remaining)
-                    time.sleep(chunk)
-                    remaining -= chunk
-                    elapsed = time.time() - start
-                    print(f'\r  ...{elapsed:.0f}/{settle} sec', end='', flush=True)
-            except KeyboardInterrupt:
-                elapsed = time.time() - start
-                print(f'\nSettle interrupted by user after {elapsed:.2f} sec')
-            else:
-                print()
-        print('Done!')
+        # Settle, while displaying time elapsed
+        print('Settling after BBX reset...')
+        elapsed = self.sleep(settle)
 
-        self.FITSkey('TIMSETTL', elapsed)
+        self.FITSkey('TIMSETTL', round(elapsed))
+        self.timetotal += elapsed + TT_RESTART_S
 
         return _
 
@@ -329,10 +351,6 @@ class Camera:
             # Replace required FITS headers
             print('Setting required FITS headers')
 
-            DATE = datetime.today().strftime('%Y%m%d')
-            self.config['OUTDIR'] = f"{self.config['DETID']}/{DATE}/"
-
-
             # Circumvent FITSkey(), set all protected FITS headers
             for k,v in self.config.items(): self.send(f'fits_set {k} {v}')  
 
@@ -355,10 +373,18 @@ class Camera:
         exptime = Exposure time (s)
         nexp = Number of exposures
         ''' 
+
+        # dt = self.exptime() if exptime is None else exptime # Never used?
+        self.timetotal += exptime*nexp + overhead(nexp) # update timing estimate
+
         return self.send(f'multi_expose {exptime} {nexp}')
 
     def expose_STIME(self, exptime: float, nexp: int=1):
-        '''Same as expose() but the server controls exposure timing instead of camera electronics''' 
+        '''Same as expose() but the server controls exposure timing instead of camera electronics'''
+
+        # dt = self.exptime() if exptime is None else exptime
+        self.timetotal += exptime*nexp + overhead(nexp) # update timing estimate
+
         return self.send(f'expose {exptime} {nexp}')
 
     def set_gain(self, gain: str, TG: bool=True):
@@ -406,6 +432,8 @@ class Camera:
 
     def LED_state(self):
         ''' Query LED state and update stored FITS headers '''
+
+        self.timetotal += TT_LEDSTATE_S
 
         # Example response from Keysight script
         # 1> 14:54:06  set  3.000 V  ON   meas  3.000 V  0.052 mA\r\n
@@ -465,20 +493,30 @@ class Camera:
         Time measured in seconds '''
         return self.send(f'led_flash {delay_on} {delay_off} {volts}')
 
-    def expose_with_flash(self, exptime, volts, delay_on, delay_off):
-        ''' Do 1 exposure with a timed LED flash.'''
-        # Min start time: FLASH_DELAY_S
-        # Max end time: FLASH_DELAY_S + nexp*(exptime + SCANTIME_S)
+    def expose_with_flash(self, exptime, volts, delay_off, delay_on=NICARD_DELAY+SCANTIME_S+MARGIN_S+1):
+        ''' Do 1 exposure with a timed LED flash.
 
-        assert delay_on > FLASH_DELAY_S  # Don't start before 1st scan is done
-        assert delay_on + delay_off < FLASH_DELAY_S + exptime  # Finish before 2nd scan
+        exptime = [s] Extra integration time of the exposure (not including scan time)
+        volts   = [V] LED voltage
+        delay_on = [s] How long to wait before LED turns on
+        delay_off = [s] LED flash duration
+
+        The default delay_on should avoid the flash overlapping the baseline scan.
+        Exptime should be long enough to avoid the flash overlapping the 2nd scan.
+        '''
+        # Min start time: NICARD_DELAY + SCANTIME_S
+        # Max end time: NICARD_DELAY + SCANTIME_S + exptime
+        DELAY_ON = NICARD_DELAY+SCANTIME_S
+
+        assert delay_on > DELAY_ON + MARGIN_S  # Don't start flash before 1st scan is done
+        assert delay_on + delay_off < DELAY_ON - MARGIN_S + exptime  # Finish flash before 2nd scan
 
         self.FITSkey('FLASH',True)
         self.FITSkey('FLASHV',volts)
         self.FITSkey('FLASHT',delay_off)
         print(f'Flashing {volts}V for {delay_off}s')
 
-        self._LED_flash(delay_on, delay_off, volts)
+        self._LED_flash(delay_on, delay_off, volts) # SQUID does not block for this command
         _ = self.expose(exptime)
 
         self.FITSkey('FLASH',False)
