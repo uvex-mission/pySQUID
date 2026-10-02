@@ -13,6 +13,7 @@ from datetime import datetime
 import os
 import socket
 import sys
+import threading
 import time
 import yaml
  
@@ -23,10 +24,10 @@ VMIN, VMAX = (0,3.3)
 
 NICARD_DELAY = 2.   # Delay between sending "expose" and start of 1st frame scan
 WRITE_DELAY_S = 11. # Overhead to write data file
-SCANTIME_S   = 12.5  # Aproximate FULL-FRAME scan time ### Different for each mode
+SCANTIME_S   = 8.5  # Aproximate FULL-FRAME scan time ### Different for each mode
 MARGIN_S     = 2
 
-TT_RESTART_S = 10  # Approx time to restart BBX
+TT_RESTART_S = 34  # Approx time to restart BBX (load + init)
 TT_LEDSTATE_S = 1  # Approx time to get LED state
 
 ### This needs to come from a table of known modes and properties
@@ -170,9 +171,12 @@ class Camera:
         self.port = config['PORT']
         self.v_extra_hi = float(config['V_EXTRA_HI'])
         self.v_extra_lo = float(config['V_EXTRA_LO'])
+
         self.dryrun = False
         self.timetotal = 0  # Estimate of total time (s) spent on commands
-                            # useful to predict test length with dryrun=True
+        self.filetotal = 0  # Number of times expose() has been called
+        self.frametotal = 0 # Total number of frames taken via expose() (nexp+1 per call)
+                            # These are useful to predict test length with dryrun=True
 
         assert self.ping()  # Returns True if connected
         print('connected')
@@ -236,6 +240,60 @@ class Camera:
     def send_MISC(self, cmd, **kwargs):
         '''Send a native MISC command.  Same options as send() '''
         return self.send('misc '+cmd)
+
+    def _send_with_progress(self, cmd, predicted, **kwargs):
+        '''Same as send(), but displays a progress bar in the foreground
+        while a slow blocking command runs in a background thread.
+
+        predicted:  Expected duration (s), used only to pace the bar.
+                    The actual wait always ends whenever the server
+                    responds -- sooner or later than predicted, not when
+                    the bar reaches 100%.
+
+        This relies on socket.recv() releasing the GIL while it blocks,
+        so the foreground loop keeps printing even though send() itself
+        is single-threaded.
+        '''
+        if self.dryrun:
+            return self.send(cmd, **kwargs)
+
+        result = {}
+        def worker():
+            try:
+                result['value'] = self.send(cmd, **kwargs)
+            except Exception as e:
+                result['error'] = e
+
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
+        start = time.time()
+
+        # Give the worker thread a moment to print send()'s own "Sending: ..."
+        # line first, so it doesn't land in the middle of the progress bar
+        time.sleep(0.5)  #0.15 works
+
+        bar_len = 30
+        try:
+            while thread.is_alive():
+                elapsed = time.time() - start
+                frac = min(elapsed/predicted, 1.0) if predicted > 0 else 1.0
+                filled = int(bar_len*frac)
+                bar = '#'*filled + '-'*(bar_len-filled)
+                print(f'\r  [{bar}] {elapsed:5.1f}/{predicted:.1f}s ({100*frac:3.0f}%)',
+                      end='', flush=True)
+                thread.join(timeout=0.5)
+        except KeyboardInterrupt:
+            print('\n  CTRL-C: no longer displaying progress, but still waiting for the '
+                  'server to finish (the exposure continues on hardware regardless) -- '
+                  'CTRL-C again to abort the script.')
+            thread.join()
+
+        elapsed = time.time() - start
+        print(f'\r  [{"#"*bar_len}] {elapsed:5.1f}/{predicted:.1f}s (100%)  done')
+
+        if 'error' in result:
+            raise result['error']
+        return result.get('value')
 
     def ping(self):
         '''Ping the server; return True if server returns "PONG" '''
@@ -372,20 +430,28 @@ class Camera:
         '''Start an exposure series; raw image data will land in project data directory
         exptime = Exposure time (s)
         nexp = Number of exposures
-        ''' 
+        '''
 
         # dt = self.exptime() if exptime is None else exptime # Never used?
-        self.timetotal += exptime*nexp + overhead(nexp) # update timing estimate
+        predicted = exptime*nexp + overhead(nexp) # estimated time (s) for send() to return
+        self.timetotal += predicted # update timing estimate
+        self.filetotal += 1         # count calls to expose()
+        self.frametotal += nexp+1   # count frames taken (nexp + 1)
 
-        return self.send(f'multi_expose {exptime} {nexp}')
+        print(f'Exposing: {nexp} x {exptime}s  (wait ~~{predicted:.1f}s)')
+        return self._send_with_progress(f'multi_expose {exptime} {nexp}', predicted)
 
     def expose_STIME(self, exptime: float, nexp: int=1):
         '''Same as expose() but the server controls exposure timing instead of camera electronics'''
 
         # dt = self.exptime() if exptime is None else exptime
-        self.timetotal += exptime*nexp + overhead(nexp) # update timing estimate
+        predicted = exptime*nexp + overhead(nexp) # estimated time (s) for send() to return
+        self.timetotal += predicted # update timing estimate
+        self.filetotal += 1         # count calls to expose_STIME()
+        self.frametotal += nexp+1   # count frames taken (nexp exposures + 1 baseline/reference frame)
 
-        return self.send(f'expose {exptime} {nexp}')
+        print(f'Exposing: {nexp} x {exptime}s  (predicted wait ~{predicted:.1f}s)')
+        return self._send_with_progress(f'expose {exptime} {nexp}', predicted)
 
     def set_gain(self, gain: str, TG: bool=True):
         ''' Set detector gain mode; optionally enable/disable transfer gate'''

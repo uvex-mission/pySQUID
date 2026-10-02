@@ -27,9 +27,9 @@ FITS_HEADERS = {
 }
 
 ### This shouldn't be necessary - we should have fixed default settings and know what they are
-BIASES = {
-	'VHIGH_TG':2.0
-	}
+# BIASES = {
+# 	'VHIGH_TG':2.0
+# 	}
 
 NOGLO = 14  			# The best NOGLO mode is typically 14
 
@@ -39,7 +39,7 @@ VLED = (0, 6.0)
 EXPTIME_FLASH_S = 45	# Duration of exposure containing the flash
 FLASH_S = 24 			# Flash duration; must be < exposure to avoid light during readout
 
-NEXP_DARK = 12  		# Number of exposures after LED flash
+NEXP_DARK = 14  		# Number of exposures after LED flash
 DARKTIME_S = 300  		# Dark duration (s)
 # DARKTIMES_S = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
 # np.random.shuffle(DARKTIMES_S)  # Randomize to disrupt trends
@@ -64,7 +64,7 @@ cam.FITSkeys(FITS_HEADERS)  # Load custom FITS headers
 cam.filebase(FILEBASE)  	# Set the output FITS filename base
 # cam.imnum(I_START)      	# Set the starting image number for filenaming
 
-cam.set_biases(BIASES)  	### Set bias voltages to non-defaults
+# cam.set_biases(BIASES)  	# Set bias voltages to non-defaults
 cam.set_NOGLO(NOGLO)    	# Set detector controller NOGLO mode
 
 cam.LED_OFF()      			# Start with LED power off
