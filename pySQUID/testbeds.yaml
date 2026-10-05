@@ -11,5 +11,10 @@
 # value listed here for that testbed.
 
 testbed1:
-  HOST: 131.215.196.219  # uvex-testbed1
-  PORT: 7777
+  HOST: 131.215.196.219   # IP of computer running SQUID server
+  PORT: 7777              # SQUID server port
+  # Optional Lakeshore parameters
+  # Set all three together to enable logging in TEMPDET FITS header
+  LKS_HOST: uvextc1.caltech.edu  # Comment out if not using Lakeshore
+  LKS_PORT: 7777
+  LKS_CHAN: C  # Input channel to read for TEMPDET (A, B, C, D, D2, D3, D4)

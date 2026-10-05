@@ -16,8 +16,11 @@ import sys
 import threading
 import time
 import yaml
- 
+
+from .lakeshore336 import read_lakeshore336_temperature
+
 TO_DEFAULT = 3 # Default timeout (s) for server connections and commands
+LKS_RETRIES = 3 # Default retry count for Lakeshore 336 temperature reads
 
 # Safety limits; ### TBC
 VMIN, VMAX = (0,3.3)
@@ -43,6 +46,12 @@ YAML_REQUIRED_KEYS = ['OPERATOR', 'TESTBED', 'DETID', 'DETTYPE', 'DETCTRL', 'LED
 # testbeds.yaml or from the user's own config file (which takes priority)
 TESTBED_REQUIRED_KEYS = ['HOST', 'PORT']
 
+# Optional per-testbed Lakeshore 336 settings (temperature logging to the
+# TEMPDET FITS header). LKS_HOST may be omitted entirely if no Lakeshore
+# is attached to a given testbed. If LKS_HOST IS given, LKS_PORT and
+# LKS_CHAN must be given too (checked in Camera.__init__).
+LKS_OPTIONAL_KEYS = ['LKS_HOST', 'LKS_PORT', 'LKS_CHAN']
+
 # Per-device settings (VEXTRAHI, VEXTRALO, ...) looked up from
 # devices.yaml by DETID. Unlike TESTBED_REQUIRED_KEYS, these always end up
 # with a value -- if devices.yaml is missing an entry for a DETID, its
@@ -56,6 +65,7 @@ DEVICES_DEFAULT_KEY = 'DEFAULT'
 PROTECTED_KEYS = ['USER', 'SUBDIR']
 PROTECTED_KEYS += YAML_REQUIRED_KEYS
 PROTECTED_KEYS += TESTBED_REQUIRED_KEYS
+PROTECTED_KEYS += LKS_OPTIONAL_KEYS
 PROTECTED_KEYS += DEVICE_KEYS
 
 # Sidecar YAML files supplying default settings for known testbeds/devices
@@ -160,6 +170,21 @@ class Camera:
                     f"in {_TESTBEDS_PATH} or in {userConfigFile}"
                 )
 
+        # LKS_HOST (Lakeshore 336) is optional -- a testbed need not have one.
+        # But if LKS_HOST IS given, LKS_PORT and LKS_CHAN must be given too.
+        self.configured_LKS = 'LKS_HOST' in config
+
+        if self.configured_LKS:
+            missing = [k for k in LKS_OPTIONAL_KEYS if k not in config.keys()]
+            if missing:
+                raise KeyError(
+                    f"LKS_HOST is set for testbed '{config['TESTBED']}' but "
+                    f"{missing} not found in {_TESTBEDS_PATH} or in {userConfigFile} "
+                    f"-- {'/'.join(LKS_OPTIONAL_KEYS)} must all be given together."
+                )
+
+            config['LKS_PORT'] = int(config['LKS_PORT']) # Fix the type
+
         # Fill in per-device bias defaults (VEXTRAHI, VEXTRALO, ...) from
         # devices.yaml, keyed by DETID. Falls back to devices.yaml's DEFAULT
         # entry (with a warning) if DETID isn't listed there. Anything the
@@ -167,22 +192,25 @@ class Camera:
         deviceDefaults = get_device_defaults(config['DETID'])
         config = {**deviceDefaults, **config}
 
-        self.host = config['HOST']
-        self.port = config['PORT']
-        self.v_extra_hi = float(config['VEXTRAHI'])
-        self.v_extra_lo = float(config['VEXTRALO'])
+        # Save internal parameters
+        self.userConfigFile = userConfigFile
+        self.config = config
 
+        # Normalize types in-place (YAML may hand these back as strings
+        # depending on how they're quoted) so self.config always holds
+        # values ready to use, with no separate typed attribute needed.
+        config['VEXTRAHI'] = float(config['VEXTRAHI'])
+        config['VEXTRALO'] = float(config['VEXTRALO'])
+
+        # Reset internal counters; These are useful to predict test length with dryrun=True
         self.dryrun = False
         self.timetotal = 0  # Estimate of total time (s) spent on commands
         self.filetotal = 0  # Number of times expose() has been called
         self.frametotal = 0 # Total number of frames taken via expose() (nexp+1 per call)
-                            # These are useful to predict test length with dryrun=True
-
+                            
+        # Test connection to SQUID server
         assert self.ping()  # Returns True if connected
         print('connected')
-
-        self.userConfigFile = userConfigFile
-        self.config = config
 
         # Remove all FITS headers and set required headers from config
         self.FITSkey_clear()
@@ -195,6 +223,22 @@ class Camera:
         subdir = '/'.join( [config['DETID'], config['TESTBED'], datetime.now().strftime("%y%m%d")] ) # YYMMDD
         # self.send(f'subdir {subdir}')
 
+        # Lakeshore 336 is optional -- warn if none is configured for this testbed,
+        # otherwise do a one-shot test read so connection problems show up now
+        if not self.configured_LKS:
+            print('WARNING: no Lakeshore 336 configured for this testbed '
+                  '(LKS_HOST not set) -- TEMPDET will not be recorded')
+        else:
+            try:
+                T = read_lakeshore336_temperature(
+                    self.config['LKS_HOST'], self.config['LKS_PORT'],
+                    self.config['LKS_CHAN'], retries=LKS_RETRIES
+                )
+                print(f"Lakeshore 336 channel {self.config['LKS_CHAN']} current temperature: {T:.3f} K")
+            except Exception as e:
+                print(f'WARNING: could not read Lakeshore 336 temperature: {e}')
+                self.configured_LKS = False
+
 
     def send(self, cmd, **kwargs):
         '''Workhorse method based on the static method below''' 
@@ -202,7 +246,7 @@ class Camera:
             print(cmd)
             return ['']
 
-        return Camera.send_static(cmd, host=self.host, port=self.port, **kwargs)
+        return Camera.send_static(cmd, host=self.config['HOST'], port=self.config['PORT'], **kwargs)
 
     @staticmethod
     def send_static(cmd, host, port, parse=True, timeout=None, quiet=False):
@@ -438,6 +482,22 @@ class Camera:
         self.filetotal += 1         # count calls to expose()
         self.frametotal += nexp+1   # count frames taken (nexp + 1)
 
+        # Record detector/cryostat temperature from the Lakeshore 336, if one
+        # is configured for this testbed (self.configured_LKS is False
+        # otherwise -- already warned about in __init__, so stay quiet here)
+        if not self.configured_LKS:
+            self.FITSkey('TEMPDET', '')
+        else:
+            try:
+                T = read_lakeshore336_temperature(
+                    self.config['LKS_HOST'], self.config['LKS_PORT'],
+                    self.config['LKS_CHAN'], retries=LKS_RETRIES
+                )
+                self.FITSkey('TEMPDET', T)
+            except Exception as e:
+                print(f'WARNING: could not read Lakeshore 336 temperature: {e}')
+                self.FITSkey('TEMPDET', '')
+
         print(f'Exposing: {nexp} x {exptime}s  (wait ~~{predicted:.1f}s)')
         return self._send_with_progress(f'multi_expose {exptime} {nexp}', predicted)
 
@@ -460,7 +520,7 @@ class Camera:
             raise ValueError('Invalid gain mode: '+gain)
 
         # Set appropriate V_EXTRA for gain mode
-        v_extra = self.v_extra_lo if gain.lower().strip().startswith('lo') else self.v_extra_hi
+        v_extra = self.config['VEXTRALO'] if gain.lower().strip().startswith('lo') else self.config['VEXTRAHI']
         _ = self.set_bias('V_EXTRA', v_extra)
 
         # Set gain mode

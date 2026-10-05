@@ -17,7 +17,8 @@ DETID:    "Unique Sensor ID"
 READOUTB: "Readout Board ID"
 LEDWAVE:  "[nm] LED wavelength"
 
-TEMPTEST: "Nominal detector temperature (K) for this test"
+TEMPTEST: "[K] Nominal detector temperature for this test"
+TEMPDET:  "[K] Detector temperature at exposure start"
 
 SKIPPED:  "Number of initial exposures skipped"
 N_EXPOS:  "Number of exposures in file"
