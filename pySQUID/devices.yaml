@@ -4,7 +4,7 @@
 #
 # Each top-level key is a DETID that a user's config YAML references via
 # the DETID key. camera_class.py looks up the matching entry here and
-# uses it to fill in V_EXTRA_HI, V_EXTRA_LO, and any other device-specific
+# uses it to fill in VEXTRAHI, VEXTRALO, and any other device-specific
 # parameters added in the future.
 #
 # Any key set in the user's own config file takes precedence over the
@@ -13,9 +13,9 @@
 # warning.
 
 DEFAULT:
-  V_EXTRA_HI: 3.011  # V_EXTRA for high gain
-  V_EXTRA_LO: 3.177  # V_EXTRA for low gain
+  VEXTRAHI: 3.011  # V_EXTRA for high gain
+  VEXTRALO: 3.177  # V_EXTRA for low gain
 
 W08D02:
-  V_EXTRA_HI: 3.011  # V_EXTRA for high gain
-  V_EXTRA_LO: 3.177  # V_EXTRA for low gain
+  VEXTRAHI: 3.011  # V_EXTRA for high gain
+  VEXTRALO: 3.177  # V_EXTRA for low gain

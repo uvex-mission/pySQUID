@@ -43,11 +43,11 @@ YAML_REQUIRED_KEYS = ['OPERATOR', 'TESTBED', 'DETID', 'DETTYPE', 'DETCTRL', 'LED
 # testbeds.yaml or from the user's own config file (which takes priority)
 TESTBED_REQUIRED_KEYS = ['HOST', 'PORT']
 
-# Per-device settings (V_EXTRA_HI, V_EXTRA_LO, ...) looked up from
+# Per-device settings (VEXTRAHI, VEXTRALO, ...) looked up from
 # devices.yaml by DETID. Unlike TESTBED_REQUIRED_KEYS, these always end up
 # with a value -- if devices.yaml is missing an entry for a DETID, its
 # DEFAULT entry is used instead (with a warning).
-DEVICE_KEYS = ['V_EXTRA_HI', 'V_EXTRA_LO']
+DEVICE_KEYS = ['VEXTRAHI', 'VEXTRALO']
 
 # Reserved key in devices.yaml holding fallback values for any DETID not
 # otherwise listed there
@@ -91,7 +91,7 @@ def get_testbed_defaults(testbed, testbedsFile=_TESTBEDS_PATH):
 
 
 def get_device_defaults(detid, devicesFile=_DEVICES_PATH):
-    '''Look up the default per-device settings (V_EXTRA_HI, V_EXTRA_LO, ...)
+    '''Look up the default per-device settings (VEXTRAHI, VEXTRALO, ...)
     for a DETID.
 
     detid:       DETID value, as it would appear in a user's config file
@@ -160,7 +160,7 @@ class Camera:
                     f"in {_TESTBEDS_PATH} or in {userConfigFile}"
                 )
 
-        # Fill in per-device bias defaults (V_EXTRA_HI, V_EXTRA_LO, ...) from
+        # Fill in per-device bias defaults (VEXTRAHI, VEXTRALO, ...) from
         # devices.yaml, keyed by DETID. Falls back to devices.yaml's DEFAULT
         # entry (with a warning) if DETID isn't listed there. Anything the
         # user sets explicitly in their own config file still takes priority.
@@ -169,8 +169,8 @@ class Camera:
 
         self.host = config['HOST']
         self.port = config['PORT']
-        self.v_extra_hi = float(config['V_EXTRA_HI'])
-        self.v_extra_lo = float(config['V_EXTRA_LO'])
+        self.v_extra_hi = float(config['VEXTRAHI'])
+        self.v_extra_lo = float(config['VEXTRALO'])
 
         self.dryrun = False
         self.timetotal = 0  # Estimate of total time (s) spent on commands

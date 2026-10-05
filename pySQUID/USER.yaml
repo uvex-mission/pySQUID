@@ -14,6 +14,6 @@ LEDWAVE:  530       # LED wavelength in nm
 # HOST:   131.215.196.219  # SQUID IP address for this testbed
 # PORT:   7777             # SQUID server port
 
-# V_EXTRA_HI/V_EXTRA_LO are looked up from devices.yaml based on DETID
-# V_EXTRA_HI: 3.016     # V_EXTRA for high gain
-# V_EXTRA_LO: 3.182     # V_EXTRA for low gain
+# VEXTRAHI/VEXTRALO are looked up from devices.yaml based on DETID
+# VEXTRAHI: 3.016     # V_EXTRA for high gain
+# VEXTRALO: 3.182     # V_EXTRA for low gain
