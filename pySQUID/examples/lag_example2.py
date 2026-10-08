@@ -1,0 +1,105 @@
+# Example pySQUID script to acquire image lag data
+#
+# USAGE:  python lag_example.py
+
+# PROTIP: Run long scripts in 'screen' to avoid accidental shutdown
+#		https://www.geeksforgeeks.org/linux-unix/screen-command-in-linux-with-examples/ 
+
+import numpy as np
+import sys
+import time
+from pySQUID import camera_class  # Camera class for talking to the SQUID testbed server
+
+DRYRUN = input('Is this a DRYRUN?  [Y]/N:  ').upper()!='N'  # DRYRUN just prints commands without executing
+
+USERCONFIG = '/disk/bifrost/uvexdet/pySQUID/pySQUID/USER.yaml'  # User's config file
+FILEBASE = 'lagdecay3'  # Test name for filenames
+# I_START = 0  	# Starting filename tag number ; skip to guard against filename collisions
+
+TIMSETTL = 600  # Wait time (s) after BBX reset to allow settling (use for precision measurements)
+				# Unclear what this value should be - it is based the older Archon controller and VIB
+				# And we should probably standardize this
+
+# Extra FITS headers not provided automatically
+FITS_HEADERS = {
+	'TEMPTEST': 172.,  # Nominal detector temperature (K) for this test
+	#'KEYWORD': VALUE, # Description
+}
+
+### This shouldn't be necessary - we should have fixed default settings and know what they are
+# BIASES = {
+# 	'VHIGH_TG':2.0
+# 	}
+
+NOGLO = 14  			# The best NOGLO mode is typically 14
+
+# Include 0V as baseline measurement with same timing
+VLED = 6.0
+EXPTIME_FLASH_S = 45		# Duration of exposure containing the flash
+FLASH_S = (7, 10.8, 13, 24) # Flash duration; expected signals ~(50, 83, 100, 200)*ke-
+
+NEXP_DARK = 45  		# Number of exposures after LED flash
+DARKTIME_S = 92  		# Dark duration (s)
+# DARKTIMES_S = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
+# np.random.shuffle(DARKTIMES_S)  # Randomize to disrupt trends
+
+#------- END OF HARDCODED PARAMETERS -------#
+
+#------- START TEST -------#
+t0 = time.time()
+
+# Setup camera
+try:
+	cam = camera_class.Camera(USERCONFIG)  # Connect to the testbed server; cam is used for all camera_class calls below
+except Exception as e:
+	print(e)
+	sys.exit(1)
+
+cam.dryrun = DRYRUN  # If True, print commands instead of executing them
+
+cam.restartBBX(settle=TIMSETTL)  # Make sure BBX is in our default configuration
+
+cam.FITSkeys(FITS_HEADERS)  # Load custom FITS headers
+cam.filebase(FILEBASE)  	# Set the output FITS filename base
+# cam.imnum(I_START)      	# Set the starting image number for filenaming
+
+# cam.set_biases(BIASES)  	# Set bias voltages to non-defaults
+cam.set_NOGLO(NOGLO)    	# Set detector controller NOGLO mode
+
+cam.LED_OFF()      			# Start with LED power off
+cam.LED_MISC_ON()  			# Enable MISC LED switch
+
+# Clear detector
+cam.set_gain('HIGH')              # Switch detector to high gain mode
+print( cam.expose(0,NEXP_DARK) )  # Take NEXP_DARK zero-second clearing exposures
+
+# Loop over parameter lists and acquire images
+
+def do_series(vled, flash_s):
+	# Single exposure with flash # exptime, volts, delay_on, Flash duration
+	cam.set_gain('LOW')                                         # Switch detector to low gain mode
+	_ = cam.expose_with_flash(EXPTIME_FLASH_S, vled, flash_s)  	# Expose with a timed LED flash
+	print(_)
+
+	# Darks to watch lag decay;  0th image will contain ~1 frame time of lag
+	cam.set_gain('HIGH')    # Back to high gain mode for the dark series
+	_ = cam.expose(DARKTIME_S, NEXP_DARK)  # Take NEXP_DARK dark exposures of length dt
+	print(_)
+
+# Dark baseline with 0V LED
+do_series(0., 1.)  # might be an issue with 0s flash
+
+for flash_s in FLASH_S:
+    do_series(VLED, flash_s)
+
+# Dark baseline repeat
+do_series(0., 1.)  # might be an issue with 0s flash
+
+cam.FITSkey_clear()  # Clear user-defined FITS headers
+print('DONE!\n')
+
+# Summarize test timing
+t1 = time.time()
+t_actual = (t1-t0)
+print(f'Estimated run time:  {round(cam.timetotal/3600,2)} hours')
+print(f'Actual run time:     {round(t_actual/3600,2)} hours')
