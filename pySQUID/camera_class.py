@@ -131,6 +131,27 @@ def get_device_defaults(detid, devicesFile=_DEVICES_PATH):
     return devices[detid]
 
 
+def _require_keys(config, keys, context, extra=None):
+    '''Raise KeyError if any of `keys` is missing from `config`.
+
+    context: text describing where the keys should have come from,
+             e.g. f"for testbed '...' in {_TESTBEDS_PATH} or in {userConfigFile}"
+    extra:   optional additional sentence appended to the error message
+    '''
+    missing = [k for k in keys if k not in config]
+    if missing:
+        msg = f"Required key(s) {missing} not found {context}"
+        if extra:
+            msg += f" -- {extra}"
+        raise KeyError(msg)
+
+
+def _check_not_protected(key):
+    '''Raise NotImplementedError if `key` is a protected FITS header key'''
+    if key.upper() in PROTECTED_KEYS:
+        raise NotImplementedError(f'Changing {key} is prohibited: https://tinyurl.com/DNahahah')
+
+
 class Camera:
 
     def __init__(self, userConfigFile):
@@ -143,9 +164,7 @@ class Camera:
         config['USER'] = f"{os.environ.get('USER')}@{socket.gethostname()}"
 
         # Check for required keys in user's config file
-        for k in YAML_REQUIRED_KEYS:
-            if k not in config.keys():
-                raise KeyError(f'Required key {k} not found in {userConfigFile}')
+        _require_keys(config, YAML_REQUIRED_KEYS, f"in {userConfigFile}")
 
         # Badger the user to check config file
         print()
@@ -163,26 +182,18 @@ class Camera:
         testbedDefaults = get_testbed_defaults(config['TESTBED'])
         config = {**testbedDefaults, **config}
 
-        for k in TESTBED_REQUIRED_KEYS:
-            if k not in config.keys():
-                raise KeyError(
-                    f"Required key {k} not found for testbed '{config['TESTBED']}' "
-                    f"in {_TESTBEDS_PATH} or in {userConfigFile}"
-                )
+        testbedContext = f"for testbed '{config['TESTBED']}' in {_TESTBEDS_PATH} or in {userConfigFile}"
+        _require_keys(config, TESTBED_REQUIRED_KEYS, testbedContext)
 
         # LKS_HOST (Lakeshore 336) is optional -- a testbed need not have one.
         # But if LKS_HOST IS given, LKS_PORT and LKS_CHAN must be given too.
         self.configured_LKS = 'LKS_HOST' in config
 
         if self.configured_LKS:
-            missing = [k for k in LKS_OPTIONAL_KEYS if k not in config.keys()]
-            if missing:
-                raise KeyError(
-                    f"LKS_HOST is set for testbed '{config['TESTBED']}' but "
-                    f"{missing} not found in {_TESTBEDS_PATH} or in {userConfigFile} "
-                    f"-- {'/'.join(LKS_OPTIONAL_KEYS)} must all be given together."
-                )
-
+            _require_keys(
+                config, LKS_OPTIONAL_KEYS, testbedContext,
+                extra=f"LKS_HOST is set, so {'/'.join(LKS_OPTIONAL_KEYS)} must all be given together."
+            )
             config['LKS_PORT'] = int(config['LKS_PORT']) # Fix the type
 
         # Fill in per-device bias defaults (VEXTRAHI, VEXTRALO, ...) from
@@ -192,15 +203,15 @@ class Camera:
         deviceDefaults = get_device_defaults(config['DETID'])
         config = {**deviceDefaults, **config}
 
-        # Save internal parameters
-        self.userConfigFile = userConfigFile
-        self.config = config
-
         # Normalize types in-place (YAML may hand these back as strings
-        # depending on how they're quoted) so self.config always holds
-        # values ready to use, with no separate typed attribute needed.
+        # depending on how they're quoted) 
         config['VEXTRAHI'] = float(config['VEXTRAHI'])
         config['VEXTRALO'] = float(config['VEXTRALO'])
+
+        # config is now fully assembled, validated, and type-coerced --
+        # save it as-is, with no further changes to follow
+        self.userConfigFile = userConfigFile
+        self.config = config
 
         # Reset internal counters; These are useful to predict test length with dryrun=True
         self.dryrun = False
@@ -225,20 +236,36 @@ class Camera:
 
         # Lakeshore 336 is optional -- warn if none is configured for this testbed,
         # otherwise do a one-shot test read so connection problems show up now
+        # A failure here permanently disables self.configured_LKS for the rest of the session
         if not self.configured_LKS:
             print('WARNING: no Lakeshore 336 configured for this testbed '
                   '(LKS_HOST not set) -- TEMPDET will not be recorded')
         else:
-            try:
-                T = read_lakeshore336_temperature(
-                    self.config['LKS_HOST'], self.config['LKS_PORT'],
-                    self.config['LKS_CHAN'], retries=LKS_RETRIES
-                )
+            T = self._read_TEMPDET()
+            if T is not None:
                 print(f"Lakeshore 336 channel {self.config['LKS_CHAN']} current temperature: {T:.3f} K")
-            except Exception as e:
-                print(f'WARNING: could not read Lakeshore 336 temperature: {e}')
+            else:
                 self.configured_LKS = False
 
+
+    def _read_TEMPDET(self):
+        '''Read the current temperature (K) from the testbed's Lakeshore 336
+
+        Returns the temperature as a float, or None if no Lakeshore is
+        configured (self.configured_LKS is False) or if the read fails
+        (a warning is printed in that case).
+        '''
+        if not self.configured_LKS:
+            return None
+
+        try:
+            return read_lakeshore336_temperature(
+                self.config['LKS_HOST'], self.config['LKS_PORT'],
+                self.config['LKS_CHAN'], retries=LKS_RETRIES
+            )
+        except Exception as e:
+            print(f'WARNING: could not read Lakeshore 336 temperature: {e}')
+            return None
 
     def send(self, cmd, **kwargs):
         '''Workhorse method based on the static method below''' 
@@ -356,9 +383,8 @@ class Camera:
     def sleep(self, delay):
         '''Sleep for `delay` seconds, printing time elapsed as it progresses.
 
-        Gracefully handles KeyboardInterrupt (CTRL-C skips the remaining
-        wait).  Returns the actual elapsed time (s), whether the sleep
-        completed in full or was interrupted early.
+        Gracefully handles KeyboardInterrupt (CTRL-C skips the remaining wait).
+        Returns the actual elapsed time (s), regardless if sleep was completed or interrupted.
         '''
         print(f'Waiting {delay} sec...  (CTRL-C to skip)')
         elapsed = delay
@@ -424,8 +450,7 @@ class Camera:
         Throws RuntimeError when key doesn't exist
         '''
         if setval is not None:
-            if key.upper() in PROTECTED_KEYS:
-                raise NotImplementedError(f'Changing {key} is prohibited: https://tinyurl.com/DNahahah')
+            _check_not_protected(key)
             return self.send(f'fits_set {key} {setval}')
         else:
             return self.send(f'fits_get {key}')[0]
@@ -435,8 +460,7 @@ class Camera:
         Throws NotImplementedError if any key is protected
         '''
         for key in keys:
-            if key.upper() in PROTECTED_KEYS:
-                raise NotImplementedError(f'Changing {key} is prohibited: https://tinyurl.com/DNahahah')
+            _check_not_protected(key)
 
         for key, setval in keys.items():
             self.FITSkey(key, setval)
@@ -444,8 +468,7 @@ class Camera:
     def FITSkey_clear(self, key: str | None=None):
         '''Clear user-defined FITS headers'''
         if key is not None:
-            if key.upper() in PROTECTED_KEYS:
-                raise NotImplementedError(f'Changing {key} is prohibited: https://tinyurl.com/DNahahah')
+            _check_not_protected(key)
             return self.send(f'fits_clear {key}')
         else:
             print( self.send(f'fits_clear_all')[0] )
@@ -483,20 +506,9 @@ class Camera:
         self.frametotal += nexp+1   # count frames taken (nexp + 1)
 
         # Record detector/cryostat temperature from the Lakeshore 336, if one
-        # is configured for this testbed (self.configured_LKS is False
-        # otherwise -- already warned about in __init__, so stay quiet here)
-        if not self.configured_LKS:
-            self.FITSkey('TEMPDET', '')
-        else:
-            try:
-                T = read_lakeshore336_temperature(
-                    self.config['LKS_HOST'], self.config['LKS_PORT'],
-                    self.config['LKS_CHAN'], retries=LKS_RETRIES
-                )
-                self.FITSkey('TEMPDET', T)
-            except Exception as e:
-                print(f'WARNING: could not read Lakeshore 336 temperature: {e}')
-                self.FITSkey('TEMPDET', '')
+        # is configured and reachable.
+        T = self._read_TEMPDET()
+        self.FITSkey('TEMPDET', T if T is not None else '')
 
         print(f'Exposing: {nexp} x {exptime}s  (wait ~~{predicted:.1f}s)')
         return self._send_with_progress(f'multi_expose {exptime} {nexp}', predicted)
@@ -516,11 +528,12 @@ class Camera:
     def set_gain(self, gain: str, TG: bool=True):
         ''' Set detector gain mode; optionally enable/disable transfer gate'''
         OKgains = ['high','hi','low','lo','dual']
-        if gain.lower().strip() not in OKgains:
+        gainNorm = gain.lower().strip()
+        if gainNorm not in OKgains:
             raise ValueError('Invalid gain mode: '+gain)
 
         # Set appropriate V_EXTRA for gain mode
-        v_extra = self.config['VEXTRALO'] if gain.lower().strip().startswith('lo') else self.config['VEXTRAHI']
+        v_extra = self.config['VEXTRALO'] if gainNorm.startswith('lo') else self.config['VEXTRAHI']
         _ = self.set_bias('V_EXTRA', v_extra)
 
         # Set gain mode
