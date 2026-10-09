@@ -16,7 +16,8 @@ omitted, e.g.:
     python keysight_lan.py 192.168.1.5 read
     python keysight_lan.py 192.168.1.5:5025 read
 
-The leading '@' in channel specs is optional — '1,2,3' and '@1,2,3' both work.
+'on'/'off'/'v'/'flash' each operate on a single channel. 'read' accepts a
+comma-separated channel list (e.g. '1,2,3') and queries each in turn.
 """
 
 import sys
@@ -43,12 +44,6 @@ def timestamp(suffix=''):
     now = datetime.now()
     fmt = f"%H:%M:%S {suffix}" if suffix else "%H:%M:%S "
     return now.strftime(fmt)
-
-
-def normalize_channel(channel):
-    """Ensure channel spec has a leading '@', e.g. '1,2,3' -> '@1,2,3'."""
-    channel = str(channel).strip()
-    return channel if channel.startswith('@') else f'@{channel}'
 
 
 class Keysight:
@@ -83,7 +78,7 @@ class Keysight:
         except pyvisa.errors.VisaIOError as e:
             raise ConnectionError(f"Keysight IO error connecting to {resource}: {e}") from e
 
-    def read(self, channel=None):
+    def state(self, channel=None):
         """Read and print voltage, current, and output state for this channel."""
         ch = channel if channel else self.channel
         ps = self._connect()
@@ -104,35 +99,27 @@ class Keysight:
               # Von (bool), Vset, Vmeas
         return state=='ON', set_v, v
 
-    def output_on(self):
-        """Turn output ON for this channel."""
-        ps = self._connect()
-        try:
-            chan = normalize_channel(self.channel)
-            ps.write(f'OUTP ON,({chan})')
-            print(timestamp(f'OUTON ({chan})'))
-        finally:
-            ps.close()
-
-    def output_off(self):
-        """Turn output OFF for this channel."""
-        ps = self._connect()
-        try:
-            chan = normalize_channel(self.channel)
-            ps.write(f'OUTP OFF,({chan})')
-            print(timestamp(f'OUTOFF ({chan})'))
-        finally:
-            ps.close()
-
-    def set_voltage(self, voltage):
-        """Set output voltage on this channel."""
+    def send_one_command(self, cmd):
+        """Select this channel and send a single SCPI command to it."""
         ps = self._connect()
         try:
             ps.write(f'INST:NSEL {self.channel}')
-            ps.write(f'VOLT {voltage}')
-            print(timestamp(f'setV {voltage} V (ch{self.channel})'))
+            ps.write(cmd)
+            print(timestamp(f'{cmd} (ch{self.channel})'))
         finally:
             ps.close()
+
+    def output_on(self):
+        """Turn output ON for this channel."""
+        return self.send_one_command('OUTP ON')
+
+    def output_off(self):
+        """Turn output OFF for this channel."""
+        return self.send_one_command('OUTP OFF')
+
+    def set_voltage(self, voltage):
+        """Set output voltage on this channel."""
+        return self.send_one_command(f'VOLT {voltage}')
 
     def flash_LED(self, delay_on, delay_off, volt=None):
         """Turn LED ON after delay_on (s) then OFF after delay_off (s).
@@ -195,7 +182,7 @@ def _parse_host_port(spec):
 
 def main():
     '''Access basic functions from the command line'''
-    
+
     args = sys.argv[1:]
 
     if len(args) < 2:
@@ -210,7 +197,7 @@ def main():
         if command == 'read':
             channels = cmd_args[0].split(',') if cmd_args else [LED_CHANNEL]
             for ch in channels:
-                Keysight(host, port, ch).read()
+                Keysight(host, port, ch).state()
 
         elif command == 'on':
             channel = cmd_args[0] if cmd_args else LED_CHANNEL

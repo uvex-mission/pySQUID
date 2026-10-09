@@ -289,7 +289,7 @@ class Camera:
                   '(KEYSIGHT_HOST not set) -- KEYSIGHT_* methods will be unavailable')
         else:
             try:
-                self.keysight.read()
+                self.keysight.state()
             except Exception as e:
                 print(f'WARNING: could not reach Keysight power supply: {e}')
                 self.configured_KEYSIGHT = False
@@ -625,8 +625,6 @@ class Camera:
         # 1> 14:54:06  set  3.000 V  ON   meas  3.000 V  0.052 mA\r\n
         response = self.send('led_read', parse=False)
 
-        ### REPLACE WITH KEYSIGHT.read()
-
         if self.dryrun: return response
 
         Von = response.split('meas')[0].split()[-1]  # item before "meas"
@@ -711,14 +709,10 @@ class Camera:
         dum = self.LED_state()
         return _
 
-    # --- Keysight power supply (direct LAN control, bypasses the SQUID
-    # server). Unlike LED_ON/LED_OFF/LED_V above -- which drive a Keysight
-    # indirectly via the server's own 'led_*' commands -- these talk
-    # straight to the instrument over VISA/VXI-11, through self.keysight
-    # (a keysight_lan.Keysight bound to KEYSIGHT_HOST/KEYSIGHT_PORT/
-    # KEYSIGHT_CHAN from testbeds.yaml; see __init__). The channel is
-    # fixed on self.keysight, so it's not a parameter here. dryrun lives
-    # entirely at this level -- Keysight itself has no concept of it. ---
+    # --- Keysight power supply (direct LAN control)
+    # These talk straight to the instrument over VISA/VXI-11, 
+    # through self.keysight configured via testbeds.yaml; see __init__).
+    # The channel is fixed on self.keysight, so it's not a parameter here.
 
     def _check_KEYSIGHT(self):
         '''Raise RuntimeError if no Keysight power supply is configured for this testbed'''
@@ -740,29 +734,46 @@ class Camera:
         print(f'{method_name}({arg_str})')
         return self.dryrun
 
-    def KEYSIGHT_read(self):
-        '''Read voltage/current/output-state from the Keysight power supply'''
+    def KEYSIGHT_state(self):
+        '''Read voltage/current/output-state from the Keysight power supply
+
+        Von:  bool; True if power supply channel is on
+        Vset: float; Programmed voltage setting (V)
+        Vmeas: float; Voltage measured by Keysight (V)
+        '''
         if self._KEYSIGHT_guard():
             return
-        return self.keysight.read()
+
+        Von, Vset, Vmeas  = self.keysight.state()
+
+        LEDon = (Von and Vset>0 and Vmeas>0)
+
+        self.FITSkey('LEDV', Vset)
+        self.FITSkey('LEDPWR', Von)
+        self.FITSkey('LEDON', LEDon)
+
+        return Von, Vset, Vmeas
 
     def KEYSIGHT_output_on(self):
         '''Turn the Keysight power supply output ON'''
         if self._KEYSIGHT_guard():
             return
-        return self.keysight.output_on()
+        _ = self.keysight.output_on()
+        return self.KEYSIGHT_state()
 
     def KEYSIGHT_output_off(self):
         '''Turn the Keysight power supply output OFF'''
         if self._KEYSIGHT_guard():
             return
-        return self.keysight.output_off()
+        _ = self.keysight.output_off()
+        return self.KEYSIGHT_state()
 
     def KEYSIGHT_set_voltage(self, voltage: float):
         '''Set output voltage on the Keysight power supply'''
         if self._KEYSIGHT_guard(voltage=voltage):
             return
-        return self.keysight.set_voltage(voltage)
+        _ = self.keysight.set_voltage(voltage)
+        return self.KEYSIGHT_state()
 
     def KEYSIGHT_flash_LED(self, delay_on: float, delay_off: float, volt: float | None = None):
         '''Flash the Keysight-driven LED: after delay_on (s), hold volt
