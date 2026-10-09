@@ -18,6 +18,7 @@ import time
 import yaml
 
 from .lakeshore336 import read_lakeshore336_temperature
+from . import keysight_lan
 
 TO_DEFAULT = 3 # Default timeout (s) for server connections and commands
 LKS_RETRIES = 3 # Default retry count for Lakeshore 336 temperature reads
@@ -52,6 +53,14 @@ TESTBED_REQUIRED_KEYS = ['HOST', 'PORT']
 # LKS_CHAN must be given too (checked in Camera.__init__).
 LKS_OPTIONAL_KEYS = ['LKS_HOST', 'LKS_PORT', 'LKS_CHAN']
 
+# Optional per-testbed Keysight power supply settings (direct LAN/VISA
+# control of the LED driver PSU via keysight_lan.py, independent of the
+# SQUID server's own LED commands). KEYSIGHT_HOST may be omitted entirely
+# if no Keysight is attached to a given testbed. If KEYSIGHT_HOST IS
+# given, KEYSIGHT_PORT and KEYSIGHT_CHAN must be given too (checked in
+# Camera.__init__).
+KEYSIGHT_OPTIONAL_KEYS = ['KEYSIGHT_HOST', 'KEYSIGHT_PORT', 'KEYSIGHT_CHAN']
+
 # Per-device settings (VEXTRAHI, VEXTRALO, ...) looked up from
 # devices.yaml by DETID. Unlike TESTBED_REQUIRED_KEYS, these always end up
 # with a value -- if devices.yaml is missing an entry for a DETID, its
@@ -66,6 +75,7 @@ PROTECTED_KEYS = ['USER', 'SUBDIR']
 PROTECTED_KEYS += YAML_REQUIRED_KEYS
 PROTECTED_KEYS += TESTBED_REQUIRED_KEYS
 PROTECTED_KEYS += LKS_OPTIONAL_KEYS
+PROTECTED_KEYS += KEYSIGHT_OPTIONAL_KEYS
 PROTECTED_KEYS += DEVICE_KEYS
 
 # Sidecar YAML files supplying default settings for known testbeds/devices
@@ -196,6 +206,30 @@ class Camera:
             )
             config['LKS_PORT'] = int(config['LKS_PORT']) # Fix the type
 
+        # KEYSIGHT_HOST (power supply, direct LAN control) is optional -- a
+        # testbed need not have one attached. But if KEYSIGHT_HOST IS given,
+        # KEYSIGHT_PORT and KEYSIGHT_CHAN must be given too.
+        self.configured_KEYSIGHT = 'KEYSIGHT_HOST' in config
+
+        if self.configured_KEYSIGHT:
+            _require_keys(
+                config, KEYSIGHT_OPTIONAL_KEYS, testbedContext,
+                extra=f"KEYSIGHT_HOST is set, so {'/'.join(KEYSIGHT_OPTIONAL_KEYS)} must all be given together."
+            )
+            config['KEYSIGHT_PORT'] = int(config['KEYSIGHT_PORT']) # Fix the type
+            config['KEYSIGHT_CHAN'] = int(config['KEYSIGHT_CHAN']) # Fix the type
+
+        # Build the Keysight handle now (fixed host/port/channel for the
+        # life of this Camera); None if no Keysight is configured for this
+        # testbed. See KEYSIGHT_* methods below for how self.dryrun is
+        # handled -- it lives entirely in Camera, not in Keysight.
+        self.keysight = (
+            keysight_lan.Keysight(
+                config['KEYSIGHT_HOST'], config['KEYSIGHT_PORT'], config['KEYSIGHT_CHAN']
+            )
+            if self.configured_KEYSIGHT else None
+        )
+
         # Fill in per-device bias defaults (VEXTRAHI, VEXTRALO, ...) from
         # devices.yaml, keyed by DETID. Falls back to devices.yaml's DEFAULT
         # entry (with a warning) if DETID isn't listed there. Anything the
@@ -236,7 +270,7 @@ class Camera:
 
         # Lakeshore 336 is optional -- warn if none is configured for this testbed,
         # otherwise do a one-shot test read so connection problems show up now
-        # A failure here permanently disables self.configured_LKS for the rest of the session
+        # Failure here disables self.configured_LKS for the rest of the session
         if not self.configured_LKS:
             print('WARNING: no Lakeshore 336 configured for this testbed '
                   '(LKS_HOST not set) -- TEMPDET will not be recorded')
@@ -246,6 +280,19 @@ class Camera:
                 print(f"Lakeshore 336 channel {self.config['LKS_CHAN']} current temperature: {T:.3f} K")
             else:
                 self.configured_LKS = False
+
+        # Keysight power supply is optional -- warn if none is configured, 
+        # otherwise do a one-shot test read so connection problems show up now 
+        # Failure here disables self.configured_KEYSIGHT for the rest of the session.
+        if not self.configured_KEYSIGHT:
+            print('WARNING: no Keysight power supply configured for this testbed '
+                  '(KEYSIGHT_HOST not set) -- KEYSIGHT_* methods will be unavailable')
+        else:
+            try:
+                self.keysight.read()
+            except Exception as e:
+                print(f'WARNING: could not reach Keysight power supply: {e}')
+                self.configured_KEYSIGHT = False
 
 
     def _read_TEMPDET(self):
@@ -578,6 +625,8 @@ class Camera:
         # 1> 14:54:06  set  3.000 V  ON   meas  3.000 V  0.052 mA\r\n
         response = self.send('led_read', parse=False)
 
+        ### REPLACE WITH KEYSIGHT.read()
+
         if self.dryrun: return response
 
         Von = response.split('meas')[0].split()[-1]  # item before "meas"
@@ -661,6 +710,67 @@ class Camera:
         self.FITSkey('FLASH',False)
         dum = self.LED_state()
         return _
+
+    # --- Keysight power supply (direct LAN control, bypasses the SQUID
+    # server). Unlike LED_ON/LED_OFF/LED_V above -- which drive a Keysight
+    # indirectly via the server's own 'led_*' commands -- these talk
+    # straight to the instrument over VISA/VXI-11, through self.keysight
+    # (a keysight_lan.Keysight bound to KEYSIGHT_HOST/KEYSIGHT_PORT/
+    # KEYSIGHT_CHAN from testbeds.yaml; see __init__). The channel is
+    # fixed on self.keysight, so it's not a parameter here. dryrun lives
+    # entirely at this level -- Keysight itself has no concept of it. ---
+
+    def _check_KEYSIGHT(self):
+        '''Raise RuntimeError if no Keysight power supply is configured for this testbed'''
+        if not self.configured_KEYSIGHT:
+            raise RuntimeError(
+                'No Keysight power supply configured for this testbed '
+                '(KEYSIGHT_HOST not set in testbeds.yaml or your config file).'
+            )
+
+    def _KEYSIGHT_guard(self, **kwargs):
+        '''Check that a Keysight is configured (raises if not), and print
+        the pending call (caller's own method name + kwargs).
+
+        Returns self.dryrun
+        '''
+        self._check_KEYSIGHT()
+        method_name = sys._getframe(1).f_code.co_name  # the caller's own name
+        arg_str = ', '.join(f'{k}={v}' for k, v in kwargs.items())
+        print(f'{method_name}({arg_str})')
+        return self.dryrun
+
+    def KEYSIGHT_read(self):
+        '''Read voltage/current/output-state from the Keysight power supply'''
+        if self._KEYSIGHT_guard():
+            return
+        return self.keysight.read()
+
+    def KEYSIGHT_output_on(self):
+        '''Turn the Keysight power supply output ON'''
+        if self._KEYSIGHT_guard():
+            return
+        return self.keysight.output_on()
+
+    def KEYSIGHT_output_off(self):
+        '''Turn the Keysight power supply output OFF'''
+        if self._KEYSIGHT_guard():
+            return
+        return self.keysight.output_off()
+
+    def KEYSIGHT_set_voltage(self, voltage: float):
+        '''Set output voltage on the Keysight power supply'''
+        if self._KEYSIGHT_guard(voltage=voltage):
+            return
+        return self.keysight.set_voltage(voltage)
+
+    def KEYSIGHT_flash_LED(self, delay_on: float, delay_off: float, volt: float | None = None):
+        '''Flash the Keysight-driven LED: after delay_on (s), hold volt
+        for delay_off (s). volt=None re-uses the instrument's currently
+        stored voltage setting (see keysight_lan.Keysight.flash_LED).'''
+        if self._KEYSIGHT_guard(delay_on=delay_on, delay_off=delay_off, volt=volt):
+            return
+        return self.keysight.flash_LED(delay_on, delay_off, volt)
 
 
 def SQUID_logo():
