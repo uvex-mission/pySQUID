@@ -3,7 +3,7 @@
 Class for sending commands to the camera server
 '''
 
-# TODO: Print/recover default bias settings
+# TODO:
 # Update hardcoded overhead timing estimate
 # Get safe bias ranges
 # Fix timeouts -- have some short default for all commands except exposures
@@ -34,6 +34,12 @@ MARGIN_S     = 2
 TT_RESTART_S = 34  # Approx time to restart BBX (load + init)
 TT_LEDSTATE_S = 1  # Approx time to get LED state
 
+# Deferred import: 
+# camera_deprecated.py imports constants from this module, so this must come after
+# those constants are defined above, not at the very top of the file with
+# the other imports -- this is what breaks the otherwise-circular import.
+from .camera_deprecated import _DeprecatedSquidLED
+
 ### This needs to come from a table of known modes and properties
 def overhead(nexp, mode=None):
     ''' Estimate overhead (s) for an exposure series'''
@@ -47,18 +53,12 @@ YAML_REQUIRED_KEYS = ['OPERATOR', 'TESTBED', 'DETID', 'DETTYPE', 'DETCTRL', 'LED
 # testbeds.yaml or from the user's own config file (which takes priority)
 TESTBED_REQUIRED_KEYS = ['HOST', 'PORT']
 
-# Optional per-testbed Lakeshore 336 settings (temperature logging to the
-# TEMPDET FITS header). LKS_HOST may be omitted entirely if no Lakeshore
-# is attached to a given testbed. If LKS_HOST IS given, LKS_PORT and
-# LKS_CHAN must be given too (checked in Camera.__init__).
+# Optional per-testbed Lakeshore 336 settings 
+# If LKS_HOST IS given, LKS_PORT and LKS_CHAN must be given too
 LKS_OPTIONAL_KEYS = ['LKS_HOST', 'LKS_PORT', 'LKS_CHAN']
 
-# Optional per-testbed Keysight power supply settings (direct LAN/VISA
-# control of the LED driver PSU via keysight_lan.py, independent of the
-# SQUID server's own LED commands). KEYSIGHT_HOST may be omitted entirely
-# if no Keysight is attached to a given testbed. If KEYSIGHT_HOST IS
-# given, KEYSIGHT_PORT and KEYSIGHT_CHAN must be given too (checked in
-# Camera.__init__).
+# Optional per-testbed Keysight power supply settings 
+# If KEYSIGHT_HOST IS given, KEYSIGHT_PORT and KEYSIGHT_CHAN must be given too
 KEYSIGHT_OPTIONAL_KEYS = ['KEYSIGHT_HOST', 'KEYSIGHT_PORT', 'KEYSIGHT_CHAN']
 
 # Per-device settings (VEXTRAHI, VEXTRALO, ...) looked up from
@@ -162,7 +162,7 @@ def _check_not_protected(key):
         raise NotImplementedError(f'Changing {key} is prohibited: https://tinyurl.com/DNahahah')
 
 
-class Camera:
+class Camera(_DeprecatedSquidLED):
 
     def __init__(self, userConfigFile):
 
@@ -734,94 +734,6 @@ class Camera:
         dum = self.LED_state()
         return _
 
-    # --- Deprecated LED commands using the SQUID server and Windows scripts
-    # Kept here for reference/fallback
-
-    def _LED_state_squid(self):
-        '''[DEPRECATED] Query LED state via the SQUID server's own
-        'led_read' command and update stored FITS headers. Superseded by
-        LED_state()'''
-
-        self.timetotal += TT_LEDSTATE_S
-
-        # Example response from Keysight script
-        # 1> 14:54:06  set  3.000 V  ON   meas  3.000 V  0.052 mA\r\n
-        response = self.send('led_read', parse=False)
-
-        if self.dryrun: return response
-
-        Von = response.split('meas')[0].split()[-1]  # item before "meas"
-        Vset = response.split('set')[1].split()[0]    # item after "set"
-        Vmeas = response.split('meas')[1].split()[0]  # item after "meas"
-
-        Von = Von.upper()=='ON'
-        Vset = float(Vset)
-        Vmeas = float(Vmeas)
-        LEDon = (Von and Vset>0 and Vmeas>0)
-
-        self.FITSkey('LEDV', Vset)
-        self.FITSkey('LEDPWR', Von)
-        self.FITSkey('LEDON', LEDon)
-
-        return Von, Vset, Vmeas  # bool, float, float
-
-    def _LED_ON_squid(self):
-        '''[DEPRECATED] Turn on the LED power via the SQUID server's own
-        'led_on' command. Superseded by LED_ON()'''
-        _ = self.send('led_on')
-        self.FITSkey('LEDPWR',True)
-        return self._LED_state_squid()
-
-    def _LED_OFF_squid(self):
-        '''[DEPRECATED] Turn off the LED power via the SQUID server's own
-        'led_off' command. Superseded by LED_OFF()'''
-        _ = self.send('led_off')
-        self.FITSkey('LEDPWR',False)
-        self.FITSkey('LEDON',False)
-        return _
-
-    def _LED_V_squid(self, setval: float):
-        '''[DEPRECATED] Set the LED voltage (V) via the SQUID server's own
-        'set_led_voltage' command. Superseded by LED_V().
-        Function returns a tuple (V_on, V_set, V_measured) '''
-        _ = self.send(f'set_led_voltage {setval}')
-        return self._LED_state_squid()
-
-    def _LED_flash(self, delay_on: float, delay_off: float, volts: float):
-        ''' After <delay_on>, flash the LED at <volts> for <delay_off>
-        Time measured in seconds '''
-        return self.send(f'led_flash {delay_on} {delay_off} {volts}')
-
-    def _expose_with_flash_squid(self, exptime, volts, delay_off, delay_on=NICARD_DELAY+SCANTIME_S+MARGIN_S+1):
-        '''[DEPRECATED] Do 1 exposure with a timed LED flash via the SQUID
-        server's own 'led_flash' command. Superseded by expose_with_flash().
-
-        exptime = [s] Extra integration time of the exposure (not including scan time)
-        volts   = [V] LED voltage
-        delay_on = [s] How long to wait before LED turns on
-        delay_off = [s] LED flash duration
-
-        The default delay_on should avoid the flash overlapping the baseline scan.
-        Exptime should be long enough to avoid the flash overlapping the 2nd scan.
-        '''
-        # Min start time: NICARD_DELAY + SCANTIME_S
-        # Max end time: NICARD_DELAY + SCANTIME_S + exptime
-        DELAY_ON = NICARD_DELAY+SCANTIME_S
-
-        assert delay_on > DELAY_ON + MARGIN_S  # Don't start flash before 1st scan is done
-        assert delay_on + delay_off < DELAY_ON - MARGIN_S + exptime  # Finish flash before 2nd scan
-
-        self.FITSkey('FLASH',True)
-        self.FITSkey('FLASHV',volts)
-        self.FITSkey('FLASHT',delay_off)
-        print(f'Flashing {volts}V for {delay_off}s')
-
-        self._LED_flash(delay_on, delay_off, volts) # SQUID does not block for this command
-        _ = self.expose(exptime)
-
-        self.FITSkey('FLASH',False)
-        dum = self._LED_state_squid()
-        return _
 
 def SQUID_logo():
     logo = "   _____  ____   __  __ ____ ____  \n"
