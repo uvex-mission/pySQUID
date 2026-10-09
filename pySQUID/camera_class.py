@@ -616,8 +616,131 @@ class Camera:
             ret.append( self.set_bias(k,v) )
         return ret
 
+    # --- BBx LED control
+    # If the LED is routed through BBx, it is toggled via MISC commands
+    # Power settings are still controlled via a Keysight supply
+    # Both the MISC switch and the Keysight power must be ON to light the LED
+
+    def LED_MISC_ON(self):
+        '''Turn on the MISC's LED switch'''
+        _ = self.send('misc_led_on')
+        self.FITSkey('LEDMISC',True)
+        return self._LED_state_squid()
+
+    def LED_MISC_OFF(self):
+        '''Turn off the MISC's LED switch'''
+        _ = self.send('misc_led_off')
+        self.FITSkey('LEDMISC',False)
+        self.FITSkey('LEDON',False)
+        return _
+
+    # --- Keysight power supply (direct LAN control)
+    # Operate the LED over VISA/VXI-11, through self.keysight configured via testbeds.yaml
+    # The channel is fixed on self.keysight, so it's not a parameter here.
+
+    def _check_KEYSIGHT(self):
+        '''Raise RuntimeError if no Keysight power supply is configured for this testbed'''
+        if not self.configured_KEYSIGHT:
+            raise RuntimeError(
+                'No Keysight power supply configured for this testbed '
+                '(KEYSIGHT_HOST not set in testbeds.yaml or your config file).'
+            )
+
+    def _KEYSIGHT_guard(self, **kwargs):
+        '''Check that a Keysight is configured (raises if not), and print
+        the pending call (caller's own method name + kwargs).
+
+        Returns self.dryrun
+        '''
+        self._check_KEYSIGHT()
+        method_name = sys._getframe(1).f_code.co_name  # the caller's own name
+        arg_str = ', '.join(f'{k}={v}' for k, v in kwargs.items())
+        print(f'{method_name}({arg_str})')
+        return self.dryrun
+
     def LED_state(self):
-        ''' Query LED state and update stored FITS headers '''
+        '''Read voltage/current/output-state from the Keysight power
+        supply and update stored FITS headers.
+
+        Von:  bool; True if power supply channel is on
+        Vset: float; Programmed voltage setting (V)
+        Vmeas: float; Voltage measured by Keysight (V)
+        '''
+        if self._KEYSIGHT_guard():
+            return
+
+        Von, Vset, Vmeas  = self.keysight.state()
+
+        LEDon = (Von and Vset>0 and Vmeas>0)
+
+        self.FITSkey('LEDV', Vset)
+        self.FITSkey('LEDPWR', Von)
+        self.FITSkey('LEDON', LEDon)
+
+        return Von, Vset, Vmeas
+
+    def LED_ON(self):
+        '''Turn on the LED power'''
+        if self._KEYSIGHT_guard():
+            return
+        _ = self.keysight.output_on()
+        return self.LED_state()
+
+    def LED_OFF(self):
+        '''Turn off the LED power'''
+        if self._KEYSIGHT_guard():
+            return
+        _ = self.keysight.output_off()
+        return self.LED_state()
+
+    def LED_V(self, setval: float):
+        '''Set the LED voltage (V)
+        Function returns a tuple (V_on, V_set, V_measured) '''
+        if self._KEYSIGHT_guard(setval=setval):
+            return
+        _ = self.keysight.set_voltage(setval)
+        return self.LED_state()
+
+    def expose_with_flash(self, exptime, volts, delay_off, delay_on=NICARD_DELAY+SCANTIME_S+MARGIN_S+1):
+        ''' Do 1 exposure with a timed LED flash, triggered directly on the
+        Keysight power supply over LAN (see keysight_lan.Keysight.flash_LED).
+
+        exptime = [s] Extra integration time of the exposure (not including scan time)
+        volts   = [V] LED voltage
+        delay_on = [s] How long to wait before LED turns on
+        delay_off = [s] LED flash duration
+
+        The default delay_on should avoid the flash overlapping the baseline scan.
+        Exptime should be long enough to avoid the flash overlapping the 2nd scan.
+        '''
+        # Min start time: NICARD_DELAY + SCANTIME_S
+        # Max end time: NICARD_DELAY + SCANTIME_S + exptime
+        DELAY_ON = NICARD_DELAY+SCANTIME_S
+
+        assert delay_on > DELAY_ON + MARGIN_S  # Don't start flash before 1st scan is done
+        assert delay_on + delay_off < DELAY_ON - MARGIN_S + exptime  # Finish flash before 2nd scan
+
+        self.FITSkey('FLASH',True)
+        self.FITSkey('FLASHV',volts)
+        self.FITSkey('FLASHT',delay_off)
+        print(f'Flashing {volts}V for {delay_off}s')
+
+        if not self._KEYSIGHT_guard(delay_on=delay_on, delay_off=delay_off, volt=volts):
+            self.keysight.flash_LED(delay_on, delay_off, volts)  # Keysight does not block for this command
+
+        _ = self.expose(exptime)
+
+        self.FITSkey('FLASH',False)
+        dum = self.LED_state()
+        return _
+
+    # --- Deprecated LED commands using the SQUID server and Windows scripts
+    # Kept here for reference/fallback
+
+    def _LED_state_squid(self):
+        '''[DEPRECATED] Query LED state via the SQUID server's own
+        'led_read' command and update stored FITS headers. Superseded by
+        LED_state()'''
 
         self.timetotal += TT_LEDSTATE_S
 
@@ -642,45 +765,36 @@ class Camera:
 
         return Von, Vset, Vmeas  # bool, float, float
 
-    def LED_MISC_ON(self):
-        '''Turn on the MISC's LED switch'''
-        _ = self.send('misc_led_on')
-        self.FITSkey('LEDMISC',True)
-        return self.LED_state()
-
-    def LED_MISC_OFF(self):
-        '''Turn off the MISC's LED switch'''
-        _ = self.send('misc_led_off')
-        self.FITSkey('LEDMISC',False)
-        self.FITSkey('LEDON',False)
-        return _
-
-    def LED_ON(self):
-        '''Turn on the LED power'''
+    def _LED_ON_squid(self):
+        '''[DEPRECATED] Turn on the LED power via the SQUID server's own
+        'led_on' command. Superseded by LED_ON()'''
         _ = self.send('led_on')
         self.FITSkey('LEDPWR',True)
-        return self.LED_state()
+        return self._LED_state_squid()
 
-    def LED_OFF(self):
-        '''Turn off the LED power'''
+    def _LED_OFF_squid(self):
+        '''[DEPRECATED] Turn off the LED power via the SQUID server's own
+        'led_off' command. Superseded by LED_OFF()'''
         _ = self.send('led_off')
         self.FITSkey('LEDPWR',False)
         self.FITSkey('LEDON',False)
         return _
 
-    def LED_V(self, setval: float):
-        '''Set the LED voltage (V)
+    def _LED_V_squid(self, setval: float):
+        '''[DEPRECATED] Set the LED voltage (V) via the SQUID server's own
+        'set_led_voltage' command. Superseded by LED_V().
         Function returns a tuple (V_on, V_set, V_measured) '''
         _ = self.send(f'set_led_voltage {setval}')
-        return self.LED_state()
+        return self._LED_state_squid()
 
     def _LED_flash(self, delay_on: float, delay_off: float, volts: float):
         ''' After <delay_on>, flash the LED at <volts> for <delay_off>
         Time measured in seconds '''
         return self.send(f'led_flash {delay_on} {delay_off} {volts}')
 
-    def expose_with_flash(self, exptime, volts, delay_off, delay_on=NICARD_DELAY+SCANTIME_S+MARGIN_S+1):
-        ''' Do 1 exposure with a timed LED flash.
+    def _expose_with_flash_squid(self, exptime, volts, delay_off, delay_on=NICARD_DELAY+SCANTIME_S+MARGIN_S+1):
+        '''[DEPRECATED] Do 1 exposure with a timed LED flash via the SQUID
+        server's own 'led_flash' command. Superseded by expose_with_flash().
 
         exptime = [s] Extra integration time of the exposure (not including scan time)
         volts   = [V] LED voltage
@@ -706,83 +820,8 @@ class Camera:
         _ = self.expose(exptime)
 
         self.FITSkey('FLASH',False)
-        dum = self.LED_state()
+        dum = self._LED_state_squid()
         return _
-
-    # --- Keysight power supply (direct LAN control)
-    # These talk straight to the instrument over VISA/VXI-11, 
-    # through self.keysight configured via testbeds.yaml; see __init__).
-    # The channel is fixed on self.keysight, so it's not a parameter here.
-
-    def _check_KEYSIGHT(self):
-        '''Raise RuntimeError if no Keysight power supply is configured for this testbed'''
-        if not self.configured_KEYSIGHT:
-            raise RuntimeError(
-                'No Keysight power supply configured for this testbed '
-                '(KEYSIGHT_HOST not set in testbeds.yaml or your config file).'
-            )
-
-    def _KEYSIGHT_guard(self, **kwargs):
-        '''Check that a Keysight is configured (raises if not), and print
-        the pending call (caller's own method name + kwargs).
-
-        Returns self.dryrun
-        '''
-        self._check_KEYSIGHT()
-        method_name = sys._getframe(1).f_code.co_name  # the caller's own name
-        arg_str = ', '.join(f'{k}={v}' for k, v in kwargs.items())
-        print(f'{method_name}({arg_str})')
-        return self.dryrun
-
-    def KEYSIGHT_state(self):
-        '''Read voltage/current/output-state from the Keysight power supply
-
-        Von:  bool; True if power supply channel is on
-        Vset: float; Programmed voltage setting (V)
-        Vmeas: float; Voltage measured by Keysight (V)
-        '''
-        if self._KEYSIGHT_guard():
-            return
-
-        Von, Vset, Vmeas  = self.keysight.state()
-
-        LEDon = (Von and Vset>0 and Vmeas>0)
-
-        self.FITSkey('LEDV', Vset)
-        self.FITSkey('LEDPWR', Von)
-        self.FITSkey('LEDON', LEDon)
-
-        return Von, Vset, Vmeas
-
-    def KEYSIGHT_output_on(self):
-        '''Turn the Keysight power supply output ON'''
-        if self._KEYSIGHT_guard():
-            return
-        _ = self.keysight.output_on()
-        return self.KEYSIGHT_state()
-
-    def KEYSIGHT_output_off(self):
-        '''Turn the Keysight power supply output OFF'''
-        if self._KEYSIGHT_guard():
-            return
-        _ = self.keysight.output_off()
-        return self.KEYSIGHT_state()
-
-    def KEYSIGHT_set_voltage(self, voltage: float):
-        '''Set output voltage on the Keysight power supply'''
-        if self._KEYSIGHT_guard(voltage=voltage):
-            return
-        _ = self.keysight.set_voltage(voltage)
-        return self.KEYSIGHT_state()
-
-    def KEYSIGHT_flash_LED(self, delay_on: float, delay_off: float, volt: float | None = None):
-        '''Flash the Keysight-driven LED: after delay_on (s), hold volt
-        for delay_off (s). volt=None re-uses the instrument's currently
-        stored voltage setting (see keysight_lan.Keysight.flash_LED).'''
-        if self._KEYSIGHT_guard(delay_on=delay_on, delay_off=delay_off, volt=volt):
-            return
-        return self.keysight.flash_LED(delay_on, delay_off, volt)
-
 
 def SQUID_logo():
     logo = "   _____  ____   __  __ ____ ____  \n"
