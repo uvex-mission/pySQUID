@@ -277,7 +277,7 @@ class Camera(_DeprecatedSquidLED):
         # Set output directory (below server home) to ../DEVICE/TESTBED/DATE
         # We don't provide this as a helper function - we don't want people setting it arbitrarily
         subdir = '/'.join( [config['DETID'], config['TESTBED'], datetime.now().strftime("%y%m%d")] ) # YYMMDD
-        # self.send(f'subdir {subdir}')
+        self.send(f'set subdir {subdir}')
 
         # Lakeshore 336 is optional -- warn if none is configured for this testbed,
         # otherwise do a one-shot test read so connection problems show up now
