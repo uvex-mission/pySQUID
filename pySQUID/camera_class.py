@@ -17,7 +17,7 @@ import threading
 import time
 import yaml
 
-from .lakeshore336 import read_lakeshore336_temperature
+from . import lakeshore336
 from . import keysight_lan
 
 TO_DEFAULT = 3 # Default timeout (s) for server connections and commands
@@ -206,6 +206,17 @@ class Camera(_DeprecatedSquidLED):
             )
             config['LKS_PORT'] = int(config['LKS_PORT']) # Fix the type
 
+        # Build the Lakeshore handle now (fixed host/port/channel for the
+        # life of this Camera); None if no Lakeshore is configured for this
+        # testbed. See _read_TEMPDET() below for how self.dryrun is
+        # handled -- it lives entirely in Camera, not in Lakeshore336.
+        self.lakeshore = (
+            lakeshore336.Lakeshore336(
+                config['LKS_HOST'], config['LKS_PORT'], config['LKS_CHAN'], retries=LKS_RETRIES
+            )
+            if self.configured_LKS else None
+        )
+
         # KEYSIGHT_HOST (power supply, direct LAN control) is optional -- a
         # testbed need not have one attached. But if KEYSIGHT_HOST IS given,
         # KEYSIGHT_PORT and KEYSIGHT_CHAN must be given too.
@@ -275,10 +286,11 @@ class Camera(_DeprecatedSquidLED):
             print('WARNING: no Lakeshore 336 configured for this testbed '
                   '(LKS_HOST not set) -- TEMPDET will not be recorded')
         else:
-            T = self._read_TEMPDET()
-            if T is not None:
+            try:
+                T = self.lakeshore.read_temperature()
                 print(f"Lakeshore 336 channel {self.config['LKS_CHAN']} current temperature: {T:.3f} K")
-            else:
+            except Exception as e:
+                print(f'WARNING: could not reach Lakeshore 336: {e}')
                 self.configured_LKS = False
 
         # Keysight power supply is optional -- warn if none is configured, 
@@ -295,21 +307,41 @@ class Camera(_DeprecatedSquidLED):
                 self.configured_KEYSIGHT = False
 
 
+    def _check_LKS(self):
+        '''Raise RuntimeError if no Lakeshore 336 is configured for this testbed'''
+        if not self.configured_LKS:
+            raise RuntimeError(
+                'No Lakeshore 336 configured for this testbed '
+                '(LKS_HOST not set in testbeds.yaml or your config file).'
+            )
+
+    def _LKS_guard(self, **kwargs):
+        '''Check that a Lakeshore 336 is configured (raises if not), and
+        print the pending call (caller's own method name + kwargs).
+
+        Returns self.dryrun
+        '''
+        self._check_LKS()
+        method_name = sys._getframe(1).f_code.co_name  # the caller's own name
+        arg_str = ', '.join(f'{k}={v}' for k, v in kwargs.items())
+        print(f'{method_name}({arg_str})')
+        return self.dryrun
+
     def _read_TEMPDET(self):
         '''Read the current temperature (K) from the testbed's Lakeshore 336
 
         Returns the temperature as a float, or None if no Lakeshore is
-        configured (self.configured_LKS is False) or if the read fails
-        (a warning is printed in that case).
+        configured (self.configured_LKS is False), if dryrun is set, or
+        if the read fails (a warning is printed in that case).
         '''
         if not self.configured_LKS:
             return None
 
+        if self._LKS_guard():
+            return None
+
         try:
-            return read_lakeshore336_temperature(
-                self.config['LKS_HOST'], self.config['LKS_PORT'],
-                self.config['LKS_CHAN'], retries=LKS_RETRIES
-            )
+            return self.lakeshore.read_temperature()
         except Exception as e:
             print(f'WARNING: could not read Lakeshore 336 temperature: {e}')
             return None
