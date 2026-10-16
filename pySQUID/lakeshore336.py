@@ -22,11 +22,19 @@ control-loop/output commands instead, addressed by output number
     SETP <output>,<value>       set the control setpoint (K)
     RAMP? <output>               query ramp on/off and rate (K/min)
     RAMP <output>,<on>,<rate>    set ramp on/off (0/1) and rate (K/min)
-    RANGE? <output>              query heater range (0 = heater off)
+    RANGE? <output>              query heater range (0=off, 1-3=LOW/MED/HIGH)
+    HTR? <output>                query heater output, % of selected range's max
+
+Loop/input introspection (see Lakeshore336.loop_info()) additionally uses:
+
+    OUTMODE? <output>            query <mode>,<input code>,<powerup enable>
+                                  -- <input code> is numeric (see
+                                  OUTMODE_INPUT_CODES), not a letter
+    INNAME? <input>              query the saved hardware name for an input
 
 Reference: Lake Shore Model 336 Temperature Controller manual,
-"Input Query Commands" / "KRDG?", and "Output and Loop Control
-Commands" / "SETP", "RAMP", "RANGE".
+"Input Query Commands" / "KRDG?", "INNAME?", and "Output and Loop
+Control Commands" / "SETP", "RAMP", "RANGE", "HTR?", "OUTMODE".
 """
 
 from __future__ import annotations
@@ -53,13 +61,26 @@ TEMP_MAX_K = 310.0
 # Maximum allowed |ramp rate| (K/min) for ramp_to_setpoint().
 RAMP_MAX_RATE = 2.0
 
+# Numeric <input> codes used by the OUTMODE command's control-input field
+# (Lake Shore 336 manual, "OUTMODE" command) -- a different encoding than
+# the input letters used everywhere else (KRDG?, INNAME?, ...), because
+# OUTMODE needs to represent "no input assigned" (code 0).
+OUTMODE_INPUT_CODES = {0: None, 1: "A", 2: "B", 3: "C", 4: "D", 5: "D2", 6: "D3", 7: "D4"}
 
-def _transact(sock, command, expect_response=True):
+# Heater range setting labels (RANGE command) for this instrument's
+# heater outputs -- a discrete OFF/LOW/MED/HIGH selector (0-3), not a
+# linear percentage of max output.
+RANGE_LABELS = {0: "OFF", 1: "LOW", 2: "MED", 3: "HIGH"}
+
+
+def _transact(sock, command, expect_response=True, allow_empty=False):
     """Send one command over an already-open socket; optionally read back
     the \\r\\n-terminated response.
 
     Raises ConnectionError if the instrument closes the connection before
-    sending a terminator, or ValueError if it sends an empty response.
+    sending a terminator. Raises ValueError if it sends an empty response,
+    unless allow_empty=True (needed for queries like INNAME? that can
+    legitimately return an empty string).
     """
     sock.sendall(f"{command}\r\n".encode("ascii"))
     if not expect_response:
@@ -71,7 +92,7 @@ def _transact(sock, command, expect_response=True):
             raise ConnectionError("Connection closed by instrument before terminator received.")
         response += chunk
     text = response.decode("ascii", errors="replace").strip()
-    if not text:
+    if not text and not allow_empty:
         raise ValueError("Empty response from instrument.")
     return text
 
@@ -318,6 +339,132 @@ class Lakeshore336:
                     pass
 
         return True
+
+    def loop_info(self, channel: str | int) -> None:
+        """
+        Print information about a Lake Shore 336 control loop or input
+        channel, depending on which kind of channel string is given, as
+        one standardized line per input/loop pairing:
+
+            INPUT: <letter or NONE>   NAME: <saved name or NONE>   TEMP: <reading or NONE>   LOOP: <designator or NONE>   SET: <setpoint or NONE>   HEAT: <ON/OFF or NONE>   PWR: <percent of range label, or NONE>
+
+        If `channel` is a valid control-loop designator (1 or 2, as a str
+        or int), prints a single row: the input that loop reads from
+        (INPUT: NONE if none assigned) with its saved hardware name and
+        current temperature (KRDG?), and that loop's setpoint (SETP?),
+        heater ON/OFF state (RANGE?), and output power as a percentage of
+        the currently selected range's max, labeled OFF/LOW/MED/HIGH (HTR?).
+
+        If `channel` is a valid input channel letter (A, B, C, D, D2, D3,
+        D4), prints that input's saved hardware name and current
+        temperature, then one row per control loop currently reading from
+        it (each with its own setpoint/heater/power) -- or a single row
+        with LOOP/SET/HEAT/PWR all NONE if no loop uses it.
+
+        Parameters
+        ----------
+        channel : str or int
+            Either a control-loop designator (1, 2, "1", or "2") or an
+            input channel letter (A, B, C, D, D2, D3, D4).
+
+        Raises
+        ------
+        ValueError
+            If `channel` is neither a valid loop designator nor a valid
+            input channel letter.
+        ConnectionError
+            If communication with the instrument fails.
+        """
+        channel = str(channel).strip()
+        channel_upper = channel.upper()
+
+        is_loop = channel in VALID_RAMP_CHANNELS
+        is_input = channel_upper in VALID_CHANNELS
+
+        if not is_loop and not is_input:
+            raise ValueError(
+                f"Invalid channel '{channel}'. Must be a loop designator "
+                f"{sorted(VALID_RAMP_CHANNELS)} or an input channel {sorted(VALID_CHANNELS)}."
+            )
+
+        def _row(input_val, name_val, temp_str, loop_val, set_str, heat_val, pwr_str):
+            print(
+                f"INPUT: {input_val or 'NONE'}   "
+                f"NAME: {name_val or 'NONE'}   "
+                f"TEMP: {temp_str or 'NONE'}   "
+                f"LOOP: {loop_val or 'NONE'}   "
+                f"SET: {set_str or 'NONE'}   "
+                f"HEAT: {heat_val or 'NONE'}   "
+                f"PWR: {pwr_str or 'NONE'}"
+            )
+
+        def _heater_status(sock, loop):
+            """Query heater ON/OFF and range label (RANGE?), and output
+            power as a % of that range's max (HTR?), for a loop."""
+            range_code = int(float(_transact(sock, f"RANGE? {loop}")))
+            status = "OFF" if range_code == 0 else "ON"
+            range_label = RANGE_LABELS.get(range_code, str(range_code))
+            power = float(_transact(sock, f"HTR? {loop}"))
+            return status, range_label, power
+
+        sock: socket.socket | None = None
+        try:
+            sock = socket.create_connection((self.host, self.port), timeout=self.timeout)
+            sock.settimeout(self.timeout)
+
+            if is_loop:
+                # Valid control loop channel: one row for the input it uses
+                _, input_code, _ = _transact(sock, f"OUTMODE? {channel}").split(",")
+                input_letter = OUTMODE_INPUT_CODES.get(int(input_code))
+                if input_letter:
+                    name = _transact(sock, f"INNAME? {input_letter}", allow_empty=True)
+                    temp = float(_transact(sock, f"KRDG? {input_letter}"))
+                    temp_str = f"{temp:.3f} K"
+                else:
+                    name = None
+                    temp_str = None
+
+                setpoint = float(_transact(sock, f"SETP? {channel}"))
+                status, range_label, power = _heater_status(sock, channel)
+                _row(
+                    input_letter, name, temp_str, channel,
+                    f"{setpoint:.3f} K", status, f"{power:.2f}% of {range_label}"
+                )
+
+            else:
+                # Valid channel name: its saved name and current temperature,
+                # plus a row per loop using it
+                name = _transact(sock, f"INNAME? {channel_upper}", allow_empty=True)
+                temp = float(_transact(sock, f"KRDG? {channel_upper}"))
+                temp_str = f"{temp:.3f} K"
+
+                used_by = []
+                for loop in sorted(VALID_RAMP_CHANNELS):
+                    _, input_code, _ = _transact(sock, f"OUTMODE? {loop}").split(",")
+                    if OUTMODE_INPUT_CODES.get(int(input_code)) == channel_upper:
+                        used_by.append(loop)
+
+                if used_by:
+                    for loop in used_by:
+                        setpoint = float(_transact(sock, f"SETP? {loop}"))
+                        status, range_label, power = _heater_status(sock, loop)
+                        _row(
+                            channel_upper, name, temp_str, loop,
+                            f"{setpoint:.3f} K", status, f"{power:.2f}% of {range_label}"
+                        )
+                else:
+                    _row(channel_upper, name, temp_str, None, None, None, None)
+
+        except OSError as err:
+            raise ConnectionError(
+                f"Failed to query Lakeshore 336 loop/channel info for '{channel}': {err}"
+            ) from err
+        finally:
+            if sock is not None:
+                try:
+                    sock.close()
+                except OSError:
+                    pass
 
 
 if __name__ == "__main__":
