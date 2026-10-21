@@ -43,7 +43,7 @@ from .camera_deprecated import _DeprecatedSquidLED
 ### This needs to come from a table of known modes and properties
 def overhead(nexp, mode=None):
     ''' Estimate overhead (s) for an exposure series'''
-    t = 12.5*(nexp+1) + 13
+    t = 8.3*(nexp+1) + 4.4
     return t
 
 # Can't proceed unless these exist in user's config file
