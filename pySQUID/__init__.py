@@ -16,7 +16,7 @@ The data-reduction submodules pull in heavier, separate dependencies
 (astropy, nptdms) and are NOT imported here — import them directly when
 needed::
 
-    from pySQUID import tdms_to_fits
+    from pySQUID import bin2fits
     from pySQUID import cdssubtract_BBx
 """
 

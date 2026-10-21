@@ -1,18 +1,18 @@
 #!/usr/bin/python3
-# tdms_to_fits.py
+# bin2fits.py
 #
-# Converts split TDMS files to a FITS image sequence, optionally saving
-# an intermediate .bin file.  If a .bin file from a prior run is passed
-# as the input argument, TDMS reading is skipped and the binary data is
-# converted to FITS directly.
+# Converts raw .bin files to a FITS image sequence.  Legacy split TDMS
+# files are also supported: they are first converted to raw binary data
+# (optionally saving an intermediate .bin file) and then to FITS.
 #
 # Usage:
-#   tdms_to_fits.py <input_basename> [<input_basename> ...] [options]
+#   bin2fits.py <input> [<input> ...] [options]
 #
 # Arguments:
-#   input_basename   One or more base paths of TDMS files (with or without .tdms
-#                    extension), paths to previously-saved .bin files, and/or glob
-#                    patterns (e.g. '2026-09-*.tdms') matching several recordings.
+#   input_basename   One or more paths to .bin files, and/or glob patterns
+#                    (e.g. '2026-09-*.bin') matching several recordings.
+#                    Legacy TDMS recordings are also accepted, as base paths (with or
+#                    without .tdms extension) or glob patterns.
 #                    Split TDMS files (<base>_0001.tdms, etc.) are included automatically
 #                    for each recording. A pattern match is only treated as a split-file
 #                    continuation -- and excluded from being its own recording -- if the
@@ -27,8 +27,8 @@
 #   --metadata FILE  Path to .yaml metadata file.
 #                    Default: <input_basename>.yaml per recording, if it exists.
 #                    If given, this single file is used for every recording in the run.
-#   --bin            Also save the intermediate .bin file (TDMS input only).
-#   --bin-only       Save .bin file only; do not convert to FITS (TDMS input only).
+#   --bin            Also save the intermediate .bin file (legacy TDMS input only).
+#   --bin-only       Save .bin file only; do not convert to FITS (legacy TDMS input only).
 #   --exposures N    Process only the first N exposures.
 #   --fast           Reuse block structure from exposure 0 for all subsequent exposures.
 #   --stream         Low-memory mode: write each exposure to FITS as it is built.
@@ -39,8 +39,9 @@
 #   --no-overwrite   Skip a recording if its output .fits file already exists in --outdir.
 #
 # Examples:
-#   tdms_to_fits.py /data/myrecording.bin --fast
-#   tdms_to_fits.py '/data/2026-09-*.tdms' --outdir /data/output --no-overwrite
+#   bin2fits.py /data/myrecording.bin --fast
+#   bin2fits.py '/data/2026-09-*.bin' --outdir /data/output --no-overwrite
+#   bin2fits.py '/data/2026-09-*.tdms' --fast   # legacy TDMS input
 
 ### TODOS:
 # DATETIME header from server
@@ -164,7 +165,7 @@ def filter_primaries(tdms_paths):
     """
     Given .tdms file paths -- from a glob match OR from literal CLI args
     (importantly, including args the *shell* already expanded from an
-    unquoted wildcard, e.g. `tdms_to_fits.py tmp/*.tdms` with no quotes:
+    unquoted wildcard, e.g. `bin2fits.py tmp/*.tdms` with no quotes:
     Python never sees the pattern, only the resulting list of literal
     filenames) -- drop any that are split continuations and return the
     sorted list of primary recording base paths (no .tdms extension).
@@ -808,7 +809,7 @@ def process_one_recording(input_arg, args):
 def main():
     parser = argparse.ArgumentParser(
         description=(
-            "Convert split TDMS files (or previously-saved .bin files) "
+            "Convert raw .bin files (or legacy split TDMS files) "
             "to FITS image sequences. Accepts multiple recordings and/or "
             "glob patterns to batch-process several recordings in one run."
         )
@@ -817,8 +818,10 @@ def main():
         "input_basenames",
         nargs="+",
         help=(
-            "One or more base paths of TDMS files (with or without .tdms extension), "
-            "paths to .bin files, and/or glob patterns (e.g. '2026-09-*.tdms') matching several recordings. "
+            "One or more paths to .bin files, and/or glob patterns "
+            "(e.g. '2026-09-*.bin') matching several recordings. "
+            "Legacy TDMS recordings are also accepted, as base paths "
+            "(with or without .tdms extension) or glob patterns. "
             "If both <base>.tdms and <base>_0001.tdms exist, these (and additional matches) are treated as a split-file."
         )
     )
@@ -835,11 +838,11 @@ def main():
     )
     parser.add_argument(
         "--bin", action="store_true",
-        help="Also save the intermediate .bin file (TDMS input only)."
+        help="Also save the intermediate .bin file (legacy TDMS input only; .bin input is already a .bin)."
     )
     parser.add_argument(
         "--bin-only", action="store_true",
-        help="Save .bin file only; do not convert to FITS (TDMS input only)."
+        help="Save .bin file only; do not convert to FITS (legacy TDMS input only)."
     )
     parser.add_argument(
         "--exposures", "-n", dest="max_exposures", type=int, default=None,

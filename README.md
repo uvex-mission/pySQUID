@@ -6,15 +6,15 @@
 Control and data-reduction tools for SQUID (Server for Quick UVEX Image Data).
 
 pySQUID is a small toolkit for operating a UVEX detector testbed camera and for
-turning its raw output (TDMS acquisitions, raw CMOS FITS frames) into
+turning its raw output (`.bin` acquisitions, raw CMOS FITS frames) into
 science-ready FITS files. It installs as a normal Python package and adds
 three commands to your environment:
 
 - `pysquid` — drops you into an interactive IPython shell with a `Camera`
   object already connected to your testbed, using settings from a YAML
   config file you provide.
-- `tdms` — converts split TDMS acquisition files (or a previously-saved
-  `.bin` file) into a FITS image sequence.
+- `bin2fits` — converts raw `.bin` acquisition files (or legacy split TDMS
+  files) into a FITS image sequence.
 - `cds` — digitally CDS-subtracts a raw CMOS MKxNK image (BBx camera),
   with optional frame stacking and dual-gain splitting.
 
@@ -69,7 +69,7 @@ pip install .
 ```
 
 This installs pySQUID and its dependencies into the `uvexcmos` conda
-environment and puts `pysquid`, `cds`, and `tdms` on `PATH` for as long as
+environment and puts `pysquid`, `cds`, and `bin2fits` on `PATH` for as long as
 that environment is active.
 
 If you're developing pySQUID itself and want code edits to take effect
@@ -150,23 +150,24 @@ lag-decay test.
 
 A YAML file with the same basename should be in the same directory as the image data.
 
-Convert a TDMS acquisition to FITS:
+Convert a raw .bin acquisition to FITS:
 
 ```bash
-tdms path/to/basename.tdms --fast  # Alongside basename.yaml
-```
-or if the .bin file already exists
-```bash
-tdms path/to/basename.bin --fast  # Alongside basename.yaml
+bin2fits path/to/basename.bin --fast  # Alongside basename.yaml
 ```
 Batch processing:
 ```bash
-tdms path/to/basename*.tdms --fast  # Automatically groups split TDMS files and YAML files
-tdms path/to/basename*.tdms --fast  --dryrun  # Summarize expected output only
+bin2fits path/to/basename*.bin --fast  # Processes each matching recording with its own YAML file
+bin2fits path/to/basename*.bin --fast  --dryrun  # Summarize expected output only
 ```
 You can take advantage of bifrost's multiple cores:
 ```bash
-for bfile in *.bin; do tdms bfile --fast & done  # Using '&' starts the jobs in the background on separate cores
+for bfile in *.bin; do bin2fits "$bfile" --fast & done  # Using '&' starts the jobs in the background on separate cores
+```
+Legacy TDMS acquisitions are also supported:
+```bash
+bin2fits path/to/basename.tdms --fast  # Alongside basename.yaml
+bin2fits path/to/basename*.tdms --fast  # Automatically groups split TDMS files and YAML files
 ```
 
 Most users should use `--fast`, which reuses the block structure from the
@@ -180,7 +181,7 @@ Next, CDS-subtract the CMOS frame data in a raw FITS file:
 cds basename.fits -verbose
 ```
 
-Run `tdms --help` or `cds --help` for the full set of options.
+Run `bin2fits --help` or `cds --help` for the full set of options.
 
 ## Understanding CMOS image data
 

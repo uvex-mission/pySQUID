@@ -44,7 +44,7 @@ dev = [
 # Console-script entry points: pip generates cross-platform wrapper
 # executables for these on install, backed by real Python callables.
 cds = "pySQUID.cdssubtract_BBx:main"
-tdms = "pySQUID.tdms_to_fits:main"
+bin2fits = "pySQUID.bin2fits:main"
 fits_table = "pySQUID.fits_table:main"
 subtract_fits = "pySQUID.subtract_fits:main"
 
@@ -59,6 +59,6 @@ packages = ["pySQUID"]
 script-files = ["pySQUID/pysquid"]
 
 [tool.setuptools.package-data]
-# Ship the yaml files that tdms_to_fits.py and camera_class.py load at
+# Ship the yaml files that bin2fits.py and camera_class.py load at
 # runtime relative to their own location.
 pySQUID = ["fits_keyword_comments.yaml", "testbeds.yaml", "devices.yaml"]

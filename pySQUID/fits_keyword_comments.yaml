@@ -1,6 +1,6 @@
 # fits_keyword_comments.yaml
 #
-# Sidecar configuration for tdms_to_fits.py.
+# Sidecar configuration for bin2fits.py.
 #
 # FITS header keyword comments, keyed by FITS keyword (max 8 characters).
 #
