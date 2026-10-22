@@ -55,7 +55,7 @@ via Code → Download ZIP, and unzip it.)
 
 pySQUID is a normal pip-installable package. The recommended way to use it
 is inside its own conda environment, so it and its dependencies stay
-isolated from everything else:
+isolated from everything else.  First make sure you have Anaconda installed -- we are recommending [Miniconda](https://www.anaconda.com/docs/getting-started/miniconda/install/linux-install) for bifrost accounts.  Then:
 
 ```bash
 # 1. Create a fresh environment (any Python 3.8+ works; 3.11 shown here)
@@ -92,11 +92,7 @@ git pull
 
 If you installed with `pip install -e .` (editable), pulled code changes
 take effect immediately — no reinstall needed. If you used a regular
-`pip install .`, re-run it after pulling to pick up the changes:
-
-```bash
-pip install .
-```
+`pip install .`, re-run it after pulling to pick up the changes.
 
 Either way, if `pyproject.toml` changed (e.g. a new dependency was added),
 re-run `pip install .` (or `pip install -e .`) so pip can install anything
@@ -104,8 +100,7 @@ new.
 
 ## Configuration
 
-`pysquid` (and the `Camera` class it wraps) need a YAML config file
-describing your testbed. At minimum it must define:
+`pysquid` needs a YAML config file describing your testbed. Currently (this will evolve) it must define:
 
 ```yaml
 OPERATOR: cshapiro   # Who are you?
@@ -117,8 +112,8 @@ LEDWAVE:  530        # LED wavelength in nm
 ```
 
 `TESTBED` is looked up in `pySQUID/testbeds.yaml`, which maps each known
-testbed name to its connection settings (`HOST`, `PORT`, and any similar
-per-testbed parameters) so you don't need to remember them yourself.
+testbed name to its hardware connection settings (`HOST`, `PORT`, and similar
+parameters for the devices at the testbed) so you don't need to remember them yourself.
 
 `DETID` is similarly looked up in `pySQUID/devices.yaml`, which maps each
 known detector to its bias settings (`V_EXTRA_HI`, `V_EXTRA_LO`, and any
@@ -171,9 +166,8 @@ bin2fits path/to/basename.tdms --fast  # Alongside basename.yaml
 bin2fits path/to/basename*.tdms --fast  # Automatically groups split TDMS files and YAML files
 ```
 
-Most users should use `--fast`, which reuses the block structure from the
-first exposure for all subsequent exposures instead of re-deriving it each
-time. Skip it only if you're working with a file that combines images with
+Most users should use `--fast`, which assumes the raw pixel data is organized
+the same way in every exposure.  Skip it only if you're working with a file that combines images with
 different formats (e.g. some FORTH-scripted tests).
 
 Next, CDS-subtract the CMOS frame data in a raw FITS file:
