@@ -134,6 +134,7 @@ testbeds.yaml/devices.yaml value.
 Launch an interactive session connected to your camera:
 
 ```bash
+conda activate uvexcmos  # or your conda env name
 pysquid path/to/your_config.yaml
 ```
 
