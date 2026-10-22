@@ -28,6 +28,8 @@ dependencies = [
   "PyYAML",
   "npTDMS",
   "ipython",
+  "pyvisa",
+  "pyvisa-py"
 ]
 
 [project.optional-dependencies]
