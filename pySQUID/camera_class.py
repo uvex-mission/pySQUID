@@ -26,6 +26,8 @@ LKS_RETRIES = 3 # Default retry count for Lakeshore 336 temperature reads
 # Safety limits; ### TBC
 VMIN, VMAX = (0,3.3)
 
+NOGLO_DEFAULT = 14 # Typically best mode
+
 NICARD_DELAY = 2.   # Delay between sending "expose" and start of 1st frame scan
 WRITE_DELAY_S = 11. # Overhead to write data file
 SCANTIME_S   = 8.5  # Aproximate FULL-FRAME scan time ### Different for each mode
@@ -270,6 +272,9 @@ class Camera(_DeprecatedSquidLED):
 
         # Remove all FITS headers and set required headers from config
         self.FITSkey_clear()
+
+        # Set default NOGLO mode
+        self.set_NOGLO(NOGLO_DEFAULT)
 
         # Naming convention
         self.send('set name_format standard')  # standard "basename_0000" | procedure "DATETIME_filename_0000"
@@ -563,23 +568,23 @@ class Camera(_DeprecatedSquidLED):
         return self.send(f'fits_list')
 
 
-    def exptime(self, setval: float | None=None):
-        '''Get or set the default exposure time in seconds.
-        Exposures use this value if no exptime is passed to expose()
+    def expdelay(self, setval: float | None=None):
+        '''Get or set the default exposure delay time in seconds.
+        Exposures use this value if no expdelay is passed to expose()
         '''
         if setval is not None:
-            return self.send(f'set exptime {setval}')[0]
+            return self.send(f'set expdelay {setval}')[0]
         else:
-            return float(self.send('get exptime')[0])
+            return float(self.send('get expdelay')[0])
 
-    def expose(self, exptime: float, nexp: int=1):
+    def expose(self, expdelay: float, nexp: int=1):
         '''Start an exposure series; raw image data will land in project data directory
-        exptime = Exposure time (s)
+        expdelay = Exposure delay time (s); total exposure time includes 1 frame scan time
         nexp = Number of exposures
         '''
 
-        # dt = self.exptime() if exptime is None else exptime # Never used?
-        predicted = exptime*nexp + overhead(nexp) # estimated time (s) for send() to return
+        # dt = self.exptime() if expdelay is None else expdelay # Never used?
+        predicted = expdelay*nexp + overhead(nexp) # estimated time (s) for send() to return
         self.timetotal += predicted # update timing estimate
         self.filetotal += 1         # count calls to expose()
         self.frametotal += nexp+1   # count frames taken (nexp + 1)
@@ -589,23 +594,24 @@ class Camera(_DeprecatedSquidLED):
         T = self._read_TEMPDET()
         self.FITSkey('TEMPDET', T if T is not None else '')
 
-        print(f'Exposing: {nexp} x {exptime}s  (wait ~~{predicted:.1f}s)')
-        return self._send_with_progress(f'multi_expose {exptime} {nexp}', predicted)
+        print(f'Exposing: {nexp} x {expdelay}s  (wait ~~{predicted:.1f}s)')
+        return self._send_with_progress(f'multi_expose {expdelay} {nexp}', predicted)
 
-    def expose_STIME(self, exptime: float, nexp: int=1):
-        '''Same as expose() but the server controls exposure timing instead of camera electronics'''
+    def expose_STIME(self, expdelay: float, nexp: int=1):
+        '''Same as expose() but the server controls timing instead of camera electronics'''
 
-        # dt = self.exptime() if exptime is None else exptime
-        predicted = exptime*nexp + overhead(nexp) # estimated time (s) for send() to return
+        # dt = self.exptime() if expdelay is None else expdelay
+        predicted = expdelay*nexp + overhead(nexp) # estimated time (s) for send() to return
         self.timetotal += predicted # update timing estimate
         self.filetotal += 1         # count calls to expose_STIME()
         self.frametotal += nexp+1   # count frames taken (nexp exposures + 1 baseline/reference frame)
 
-        print(f'Exposing: {nexp} x {exptime}s  (predicted wait ~{predicted:.1f}s)')
-        return self._send_with_progress(f'expose {exptime} {nexp}', predicted)
+        print(f'Exposing: {nexp} x {expdelay}s  (predicted wait ~{predicted:.1f}s)')
+        return self._send_with_progress(f'expose {expdelay} {nexp}', predicted)
 
     def set_gain(self, gain: str, TG: bool=True):
-        ''' Set detector gain mode; optionally enable/disable transfer gate'''
+        ''' Set detector gain mode ('LOW', 'HIGH', 'DUAL'); optionally enable/disable transfer gate
+        Transger gate is enabled by default (TG = True)'''
         OKgains = ['high','hi','low','lo','dual']
         gainNorm = gain.lower().strip()
         if gainNorm not in OKgains:
@@ -621,7 +627,7 @@ class Camera(_DeprecatedSquidLED):
         return  ret
 
     def set_NOGLO(self, ng: int):
-        ''' Change detector controller NOGLO mode;  ints 0-15; 0-7 all bad ### 14 is best (TBC)
+        ''' Change detector controller NOGLO mode; use ints 8-15; 0-7 are all bad.  14 is typically best
         8: off
         9: Vhighs off
         10: I_PIX_PAD=3.3V
@@ -631,6 +637,10 @@ class Camera(_DeprecatedSquidLED):
         return self.send(f'set_noglo {ng}')
 
     def set_bias(self, bias: str, volts: float):
+        '''Change a bias on BBx.
+        Bias options: 'PIX_REF', 'V_EXTRA', 'PIX_SUPPLY', 'VHIGH_TG', 'VLOW_TG'
+        volts:  bias voltage (V)
+        '''
 
         OKbiases = ['PIX_REF', 'V_EXTRA', 'PIX_SUPPLY', 'VHIGH_TG', 'VLOW_TG']
         if bias.upper().strip() not in OKbiases:
