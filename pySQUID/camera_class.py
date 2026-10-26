@@ -7,7 +7,6 @@ Class for sending commands to the camera server
 # Update hardcoded overhead timing estimate
 # Get safe bias ranges
 # Fix timeouts -- have some short default for all commands except exposures
-# UNTESTED: set_hardware_window <start row> <end row>
 
 from datetime import datetime
 import os
@@ -22,6 +21,7 @@ from . import keysight_lan
 
 TO_DEFAULT = 3 # Default timeout (s) for server connections and commands
 LKS_RETRIES = 3 # Default retry count for Lakeshore 336 temperature reads
+TEMPDET_NONE = -999.0 # TEMPDET value written when Lakeshore is unavailable
 
 # Safety limits; ### TBC
 VMIN, VMAX = (0,3.3)
@@ -30,11 +30,15 @@ NOGLO_DEFAULT = 14 # Typically best mode
 
 NICARD_DELAY = 2.   # Delay between sending "expose" and start of 1st frame scan
 WRITE_DELAY_S = 11. # Overhead to write data file
-SCANTIME_S   = 8.5  # Aproximate FULL-FRAME scan time ### Different for each mode
+SCANTIME_S   = 8.4  # Aproximate FULL-FRAME scan time ### Different for each mode
 MARGIN_S     = 2
 
+TT_EXPOSURE_S  = 4 # Approx exposure overhead (s)
 TT_RESTART_S = 34  # Approx time to restart BBX (load + init)
 TT_LEDSTATE_S = 1  # Approx time to get LED state
+
+DETROWS = 4096
+DETCOLS = 4096
 
 # Deferred import: 
 # camera_deprecated.py imports constants from this module, so this must come after
@@ -43,9 +47,9 @@ TT_LEDSTATE_S = 1  # Approx time to get LED state
 from .camera_deprecated import _DeprecatedSquidLED
 
 ### This needs to come from a table of known modes and properties
-def overhead(nexp, mode=None):
+def overhead(nexp, mode=None, nrows=DETROWS):
     ''' Estimate overhead (s) for an exposure series'''
-    t = 8.3*(nexp+1) + 4.4
+    t = SCANTIME_S*(nexp+1)*nrows/float(DETROWS) + TT_EXPOSURE_S
     return t
 
 # Can't proceed unless these exist in user's config file
@@ -210,8 +214,7 @@ class Camera(_DeprecatedSquidLED):
 
         # Build the Lakeshore handle now (fixed host/port/channel for the
         # life of this Camera); None if no Lakeshore is configured for this
-        # testbed. See _read_TEMPDET() below for how self.dryrun is
-        # handled -- it lives entirely in Camera, not in Lakeshore336.
+        # testbed. See _read_TEMPDET() below for how self.dryrun is handled
         self.lakeshore = (
             lakeshore336.Lakeshore336(
                 config['LKS_HOST'], config['LKS_PORT'], config['LKS_CHAN'], retries=LKS_RETRIES
@@ -234,8 +237,7 @@ class Camera(_DeprecatedSquidLED):
 
         # Build the Keysight handle now (fixed host/port/channel for the
         # life of this Camera); None if no Keysight is configured for this
-        # testbed. See KEYSIGHT_* methods below for how self.dryrun is
-        # handled -- it lives entirely in Camera, not in Keysight.
+        # testbed. See KEYSIGHT_* methods below for how self.dryrun is handled
         self.keysight = (
             keysight_lan.Keysight(
                 config['KEYSIGHT_HOST'], config['KEYSIGHT_PORT'], config['KEYSIGHT_CHAN']
@@ -261,6 +263,7 @@ class Camera(_DeprecatedSquidLED):
         self.config = config
 
         # Reset internal counters; These are useful to predict test length with dryrun=True
+        self.quiet  = False
         self.dryrun = False
         self.timetotal = 0  # Estimate of total time (s) spent on commands
         self.filetotal = 0  # Number of times expose() has been called
@@ -285,22 +288,25 @@ class Camera(_DeprecatedSquidLED):
         self.send(f'set subdir {subdir}')
 
         # Lakeshore 336 is optional -- warn if none is configured for this testbed,
-        # otherwise do a one-shot test read so connection problems show up now
-        # Failure here disables self.configured_LKS for the rest of the session
+        # otherwise do a one-shot test read so connection problems show up now.
+        # If the test read fails, ask whether to continue. A failure does not
+        # disable the Lakeshore; expose() will keep trying to read it.
         if not self.configured_LKS:
             print('WARNING: no Lakeshore 336 configured for this testbed '
-                  '(LKS_HOST not set) -- TEMPDET will not be recorded')
+                  '(LKS_HOST not set) -- TEMPDET will be recorded as -999.0')
         else:
             try:
                 T = self.lakeshore.read_temperature()
                 print(f"Lakeshore 336 channel {self.config['LKS_CHAN']} current temperature: {T:.3f} K")
             except Exception as e:
                 print(f'WARNING: could not reach Lakeshore 336: {e}')
-                self.configured_LKS = False
+                answer = input('Continue without a Lakeshore reading? [y/N] ').strip().lower()
+                if answer not in ('y', 'yes'):
+                    raise RuntimeError('Aborted: Lakeshore 336 not reachable') from e
 
         # Keysight power supply is optional -- warn if none is configured, 
         # otherwise do a one-shot test read so connection problems show up now 
-        # Failure here disables self.configured_KEYSIGHT for the rest of the session.
+        # A failure here or in any Keysight command raises errors, stopping the script.
         if not self.configured_KEYSIGHT:
             print('WARNING: no Keysight power supply configured for this testbed '
                   '(KEYSIGHT_HOST not set) -- KEYSIGHT_* methods will be unavailable')
@@ -320,29 +326,14 @@ class Camera(_DeprecatedSquidLED):
                 '(LKS_HOST not set in testbeds.yaml or your config file).'
             )
 
-    def _LKS_guard(self, **kwargs):
-        '''Check that a Lakeshore 336 is configured (raises if not), and
-        print the pending call (caller's own method name + kwargs).
-
-        Returns self.dryrun
-        '''
-        self._check_LKS()
-        method_name = sys._getframe(1).f_code.co_name  # the caller's own name
-        arg_str = ', '.join(f'{k}={v}' for k, v in kwargs.items())
-        print(f'{method_name}({arg_str})')
-        return self.dryrun
-
     def _read_TEMPDET(self):
         '''Read the current temperature (K) from the testbed's Lakeshore 336
 
         Returns the temperature as a float, or None if no Lakeshore is
-        configured (self.configured_LKS is False), if dryrun is set, or
-        if the read fails (a warning is printed in that case).
+        configured, if dryrun is set, or if the read fails (a warning is
+        printed in that case). A failed read does not disable the Lakeshore.
         '''
-        if not self.configured_LKS:
-            return None
-
-        if self._LKS_guard():
+        if not self.configured_LKS or self.dryrun:
             return None
 
         try:
@@ -354,10 +345,11 @@ class Camera(_DeprecatedSquidLED):
     def send(self, cmd, **kwargs):
         '''Workhorse method based on the static method below''' 
         if self.dryrun:
-            print(cmd)
+            print(f"Dryrun: {cmd}")
             return ['']
 
-        return Camera.send_static(cmd, host=self.config['HOST'], port=self.config['PORT'], **kwargs)
+        return Camera.send_static(cmd, host=self.config['HOST'], port=self.config['PORT'], 
+                                    quiet=self.quiet, **kwargs)
 
     @staticmethod
     def send_static(cmd, host, port, parse=True, timeout=None, quiet=False):
@@ -577,31 +569,42 @@ class Camera(_DeprecatedSquidLED):
         else:
             return float(self.send('get expdelay')[0])
 
-    def expose(self, expdelay: float, nexp: int=1):
+    def expose(self, expdelay: float, nexp: int=1, nrows: int=DETROWS, rowstart: int=0):
         '''Start an exposure series; raw image data will land in project data directory
         expdelay = Exposure delay time (s); total exposure time includes 1 frame scan time
         nexp = Number of exposures
+        
+        The TEMPDET header records the Lakeshore 336 temperature (K); TEMPDET = -999.0
+        means no temperature was recorded for that exposure.
         '''
 
+        # Band of Interest
+        self.send_MISC(f'{rowstart} STROW ! {rowstart+nrows-1} ENDROW ! PARM>')
+
         # dt = self.exptime() if expdelay is None else expdelay # Never used?
-        predicted = expdelay*nexp + overhead(nexp) # estimated time (s) for send() to return
+        predicted = expdelay*nexp + overhead(nexp, nrows=nrows) # estimated time (s) for send() to return
         self.timetotal += predicted # update timing estimate
         self.filetotal += 1         # count calls to expose()
         self.frametotal += nexp+1   # count frames taken (nexp + 1)
 
-        # Record detector/cryostat temperature from the Lakeshore 336, if one
-        # is configured and reachable.
+        # Record detector/cryostat temperature (K) from the Lakeshore 336 in the
+        # TEMPDET header. TEMPDET_NONE is written when no reading is available
+        # (no Lakeshore configured, dryrun, or read failure), so a stale value
+        # from an earlier session is never left on the server.
         T = self._read_TEMPDET()
-        self.FITSkey('TEMPDET', T if T is not None else '')
+        self.FITSkey('TEMPDET', T if T is not None else TEMPDET_NONE)
 
         print(f'Exposing: {nexp} x {expdelay}s  (wait ~~{predicted:.1f}s)')
         return self._send_with_progress(f'multi_expose {expdelay} {nexp}', predicted)
 
-    def expose_STIME(self, expdelay: float, nexp: int=1):
+    def expose_STIME(self, expdelay: float, nexp: int=1, nrows: int=DETROWS, rowstart: int=0):
         '''Same as expose() but the server controls timing instead of camera electronics'''
 
+        # Band of Interest
+        self.send_MISC(f'{rowstart} STROW ! {rowstart+nrows-1} ENDROW ! PARM>')
+
         # dt = self.exptime() if expdelay is None else expdelay
-        predicted = expdelay*nexp + overhead(nexp) # estimated time (s) for send() to return
+        predicted = expdelay*nexp + overhead(nexp, nrows=nrows) # estimated time (s) for send() to return
         self.timetotal += predicted # update timing estimate
         self.filetotal += 1         # count calls to expose_STIME()
         self.frametotal += nexp+1   # count frames taken (nexp exposures + 1 baseline/reference frame)

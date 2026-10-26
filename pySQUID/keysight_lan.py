@@ -44,6 +44,13 @@ LED_CHANNEL = 1
 CONNECT_ATTEMPTS = 3
 CONNECT_RETRY_DELAY_S = 1.5
 
+# Retry policy for single-command operations (state read, set on/off/voltage).
+# Each attempt opens a fresh connection. flash_LED() is deliberately not
+# retried: it is a multi-step list sequence, and a partial retry could leave
+# the supply in an unexpected state.
+CMD_ATTEMPTS = 3
+CMD_RETRY_DELAY_S = 1.0
+
 def timestamp(suffix=''):
     """Return a formatted timestamp string."""
     now = datetime.now()
@@ -96,9 +103,24 @@ class Keysight:
             f"Keysight IO error connecting to {resource} after "
             f"{CONNECT_ATTEMPTS} attempts: {last_error}") from last_error
 
-    def state(self, channel=None):
-        """Read and print voltage, current, and output state for this channel."""
-        ch = channel if channel else self.channel
+    def _with_retries(self, what, fn):
+        """Call fn() up to CMD_ATTEMPTS times. Retries on ConnectionError or
+        VISA I/O errors; raises ConnectionError after the final attempt fails."""
+        last_error = None
+        for attempt in range(1, CMD_ATTEMPTS + 1):
+            try:
+                return fn()
+            except (ConnectionError, pyvisa.errors.VisaIOError) as e:
+                last_error = e
+                if attempt < CMD_ATTEMPTS:
+                    print(timestamp(f"{what} failed on {self.host} "
+                                    f"(attempt {attempt}/{CMD_ATTEMPTS}): {e}; retrying"))
+                    time.sleep(CMD_RETRY_DELAY_S)
+        raise ConnectionError(
+            f"Keysight {what} failed on {self.host} after {CMD_ATTEMPTS} attempts: {last_error}"
+        ) from last_error
+
+    def _state_once(self, ch):
         ps = self._connect()
         try:
             ps.write(f'INST:NSEL {ch}')
@@ -109,16 +131,19 @@ class Keysight:
 
             print(f"CH{ch}> {timestamp()} set {set_v:6.3f} V  {state:3s}  "
                   f"meas {v:6.3f} V {c:6.3f} mA")
-        except pyvisa.errors.VisaIOError as e:
-            raise ConnectionError(f"Keysight read error: {e}") from e
         finally:
             ps.close()
 
-              # Von (bool), Vset, Vmeas
-        return state=='ON', set_v, v
+        # Von (bool), Vset, Vmeas
+        return state == 'ON', set_v, v
 
-    def send_one_command(self, cmd):
-        """Select this channel and send a single SCPI command to it."""
+    def state(self, channel=None):
+        """Read and print voltage, current, and output state for this channel.
+        Retries up to CMD_ATTEMPTS times; raises ConnectionError if all fail."""
+        ch = channel if channel else self.channel
+        return self._with_retries('state read', lambda: self._state_once(ch))
+
+    def _send_once(self, cmd):
         ps = self._connect()
         try:
             ps.write(f'INST:NSEL {self.channel}')
@@ -126,6 +151,11 @@ class Keysight:
             print(timestamp(f'{cmd} (ch{self.channel})'))
         finally:
             ps.close()
+
+    def send_one_command(self, cmd):
+        """Select this channel and send a single SCPI command to it.
+        Retries up to CMD_ATTEMPTS times; raises ConnectionError if all fail."""
+        return self._with_retries(f'command {cmd!r}', lambda: self._send_once(cmd))
 
     def output_on(self):
         """Turn output ON for this channel."""
