@@ -22,8 +22,8 @@ comma-separated channel list (e.g. '1,2,3') and queries each in turn.
 
 import sys
 import pyvisa
+import time
 from datetime import datetime
-#import time
 
 
 # DEFAULT_PORT is the standard SCPI/VXI-11 port for this instrument family,
@@ -38,6 +38,11 @@ DEFAULT_PORT = 5025
 
 # Default LED channel
 LED_CHANNEL = 1
+
+# Retry policy for opening a LAN connection. A transient refusal from the
+# instrument (e.g. a VXI-11 'create link' protocol error) often clears on retry.
+CONNECT_ATTEMPTS = 3
+CONNECT_RETRY_DELAY_S = 1.5
 
 def timestamp(suffix=''):
     """Return a formatted timestamp string."""
@@ -61,22 +66,35 @@ class Keysight:
     def _connect(self):
         """Open and return the instrument resource over LAN.
 
-        Raises ConnectionError on failure (instead of killing the process),
-        since this may be called repeatedly from a long-running session.
+        Retries up to CONNECT_ATTEMPTS times, pausing CONNECT_RETRY_DELAY_S
+        between tries. Raises ConnectionError only after the final attempt
+        fails (instead of killing the process), since this may be called
+        repeatedly from a long-running session.
         """
         # '@py' = pyvisa's pure-Python backend.
         # It talks TCPIP/VXI-11 directly over the network, so no NI-VISA /
         # Keysight IO Libraries / IVI binary needs to be installed on this machine
         resource = f'TCPIP0::{self.host}::{self.port}::INSTR'
         rm = pyvisa.ResourceManager('@py')
-        try:
-            ps = rm.open_resource(resource)
-            # Only needed if using a ...::SOCKET resource instead of VXI-11:
-            # ps.read_termination = '\n'
-            # ps.write_termination = '\n'
-            return ps
-        except pyvisa.errors.VisaIOError as e:
-            raise ConnectionError(f"Keysight IO error connecting to {resource}: {e}") from e
+        last_error = None
+        for attempt in range(1, CONNECT_ATTEMPTS + 1):
+            try:
+                ps = rm.open_resource(resource)
+                # Only needed if using a ...::SOCKET resource instead of VXI-11:
+                # ps.read_termination = '\n'
+                # ps.write_termination = '\n'
+                return ps
+            except (pyvisa.errors.VisaIOError, OSError) as e:
+                # OSError covers raw socket/protocol errors (e.g. Errno 71)
+                # that pyvisa_py does not wrap in VisaIOError.
+                last_error = e
+                if attempt < CONNECT_ATTEMPTS:
+                    print(timestamp(f"Connect to {resource} failed "
+                                    f"(attempt {attempt}/{CONNECT_ATTEMPTS}): {e}; retrying"))
+                    time.sleep(CONNECT_RETRY_DELAY_S)
+        raise ConnectionError(
+            f"Keysight IO error connecting to {resource} after "
+            f"{CONNECT_ATTEMPTS} attempts: {last_error}") from last_error
 
     def state(self, channel=None):
         """Read and print voltage, current, and output state for this channel."""

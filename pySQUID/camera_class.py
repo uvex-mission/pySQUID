@@ -308,8 +308,8 @@ class Camera(_DeprecatedSquidLED):
             try:
                 self.keysight.state()
             except Exception as e:
-                print(f'WARNING: could not reach Keysight power supply: {e}')
-                self.configured_KEYSIGHT = False
+                print(f'ERROR: could not reach Keysight power supply: {e}')
+                raise e
 
 
     def _check_LKS(self):
@@ -667,7 +667,7 @@ class Camera(_DeprecatedSquidLED):
         '''Turn on the MISC's LED switch'''
         _ = self.send('misc_led_on')
         self.FITSkey('LEDMISC',True)
-        return self._LED_state_squid()
+        return self.LED_state()
 
     def LED_MISC_OFF(self):
         '''Turn off the MISC's LED switch'''
