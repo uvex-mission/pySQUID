@@ -10,6 +10,8 @@ Usage:
 
     For a single channel only (default is ch 1 LED):
     python keysight_lan.py HOST[:PORT] flash <delay_on> <delay_off> <voltage> [channel]
+    python keysight_lan.py HOST[:PORT] fault [channel]
+    python keysight_lan.py HOST[:PORT] clear [channel]
 
 HOST is required. PORT defaults to 5025 (the standard SCPI/VXI-11 port) if
 omitted, e.g.:
@@ -143,6 +145,61 @@ class Keysight:
         ch = channel if channel else self.channel
         return self._with_retries('state read', lambda: self._state_once(ch))
 
+    def _fault_once(self):
+        ps = self._connect()
+        try:
+            ps.write(f'INST:NSEL {self.channel}')
+            ovp = ps.query('VOLT:PROT:TRIP?').strip() == '1'
+            ocp = ps.query('CURR:PROT:TRIP?').strip() == '1'
+        finally:
+            ps.close()
+
+        faulted = ovp or ocp
+        details = {'ovp_tripped': ovp, 'ocp_tripped': ocp}
+        status = 'FAULT' if faulted else 'OK'
+        tripped = ', '.join(name for name, hit in
+                            (('OVP', ovp), ('OCP', ocp)) if hit) or 'none'
+        print(f"CH{self.channel}> {timestamp()} {status}  tripped: {tripped}")
+        return faulted, details
+
+    def fault_status(self):
+        """Check this channel's over-voltage (OVP) and over-current (OCP)
+        protection trip flags. Read-only: does not clear a latched trip.
+        Returns (faulted, details) where faulted is True if either trip is set
+        and details is a dict {'ovp_tripped': bool, 'ocp_tripped': bool}.
+        Retries up to CMD_ATTEMPTS times; raises ConnectionError if all fail."""
+        return self._with_retries('fault check', self._fault_once)
+
+    def clear_fault(self):
+        """Clear a latched OVP/OCP trip on this channel.
+
+        Sequence (each step is printed as it runs):
+          1. Output OFF
+          2. Voltage set to 0 V
+          3. OUTP:PROT:CLE to clear the latched trip
+          4. Check fault status
+          5. If clearing re-enabled the output, turn it OFF again
+
+        The trip cause must already be removed; this does not fix it.
+        Returns (cleared, details, output_on) where cleared is True if no
+        OVP/OCP trip remains, details is the fault_status() dict, and
+        output_on is the output state after the sequence.
+        """
+        print(timestamp(f"Clearing fault on ch{self.channel}"))
+        self.state()
+        self.output_off()
+        self.set_voltage(0)
+        self.send_one_command('OUTP:PROT:CLE')
+        faulted, details = self.fault_status()
+        output_on, _, _ = self.state()
+        if output_on:
+            self.output_off()
+            output_on, _, _ = self.state()
+        cleared = not faulted
+        print(timestamp(f"Fault {'cleared' if cleared else 'STILL PRESENT'} "
+                         f"on ch{self.channel}"))
+        return cleared, details, output_on
+
     def _send_once(self, cmd):
         ps = self._connect()
         try:
@@ -270,6 +327,14 @@ def main():
             delay_on, delay_off, volt = cmd_args[0], cmd_args[1], cmd_args[2]
             channel = cmd_args[3] if len(cmd_args) > 3 else LED_CHANNEL
             Keysight(host, port, channel).flash_LED(delay_on, delay_off, volt)
+
+        elif command == 'fault':
+            channel = cmd_args[0] if cmd_args else LED_CHANNEL
+            Keysight(host, port, channel).fault_status()
+
+        elif command == 'clear':
+            channel = cmd_args[0] if cmd_args else LED_CHANNEL
+            Keysight(host, port, channel).clear_fault()
 
         else:
             print(f"Unknown command: '{command}'")
