@@ -573,7 +573,7 @@ class Camera(_DeprecatedSquidLED):
         '''Start an exposure series; raw image data will land in project data directory
         expdelay = Exposure delay time (s); total exposure time includes 1 frame scan time
         nexp = Number of exposures
-        
+
         The TEMPDET header records the Lakeshore 336 temperature (K); TEMPDET = -999.0
         means no temperature was recorded for that exposure.
         '''
@@ -746,7 +746,8 @@ class Camera(_DeprecatedSquidLED):
         _ = self.keysight.set_voltage(setval)
         return self.LED_state()
 
-    def expose_with_flash(self, exptime, volts, delay_off, delay_on=NICARD_DELAY+SCANTIME_S+MARGIN_S+1):
+    def expose_with_flash(self, exptime, volts, delay_off, delay_on=NICARD_DELAY+SCANTIME_S+MARGIN_S+1,
+                                rowstart=0, nrows=DETROWS):
         ''' Do 1 exposure with a timed LED flash, triggered directly on the
         Keysight power supply over LAN (see keysight_lan.Keysight.flash_LED).
 
@@ -773,7 +774,7 @@ class Camera(_DeprecatedSquidLED):
         if not self._KEYSIGHT_guard(delay_on=delay_on, delay_off=delay_off, volt=volts):
             self.keysight.flash_LED(delay_on, delay_off, volts)  # Keysight does not block for this command
 
-        _ = self.expose(exptime)
+        _ = self.expose(exptime, rowstart=rowstart, nrows=nrows)
 
         self.FITSkey('FLASH',False)
         dum = self.LED_state()
