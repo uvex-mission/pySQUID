@@ -615,19 +615,24 @@ class Camera(_DeprecatedSquidLED):
     def set_gain(self, gain: str, TG: bool=True):
         ''' Set detector gain mode ('LOW', 'HIGH', 'DUAL'); optionally enable/disable transfer gate
         Transger gate is enabled by default (TG = True)'''
-        OKgains = ['high','hi','low','lo','dual']
-        gainNorm = gain.lower().strip()
-        if gainNorm not in OKgains:
-            raise ValueError('Invalid gain mode: '+gain)
+        
+        gainMap = {'HI':'HIGH', 'HIGH':'HIGH', 'LO':'LOW', 'LOW':'LOW', 'DU':'DUAL', 'DUAL':'DUAL'}
+        try:
+            gainNorm = gainMap[gain.upper().strip()]
+        except KeyError as e:
+            raise Exception('Invalid gain mode: '+gain) from e
 
         # Set appropriate V_EXTRA for gain mode
-        v_extra = self.config['VEXTRALO'] if gainNorm.startswith('lo') else self.config['VEXTRAHI']
+        v_extra = self.config['VEXTRALO'] if gainNorm.startswith('LO') else self.config['VEXTRAHI']
         _ = self.set_bias('V_EXTRA', v_extra)
 
         # Set gain mode
         TGstr = 'true' if TG else 'false'
-        ret = self.send(f'set_hardware {gain} {TGstr}')
-        return  ret
+        ret = self.send(f'set_hardware {gainNorm.lower()} {TGstr}')
+
+        self.FITSkey('GAINMODE',gainNorm)
+
+        return ret
 
     def set_NOGLO(self, ng: int):
         ''' Change detector controller NOGLO mode; use ints 8-15; 0-7 are all bad.  14 is typically best

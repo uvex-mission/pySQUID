@@ -57,9 +57,12 @@ import tempfile
 import numpy as np
 from astropy.io import fits
 import yaml
-# from datetime import datetime
 from nptdms.reader import TdmsReader
 
+# Suppress warnings about too-long FITS key names
+import warnings
+from astropy.io.fits.verify import VerifyWarning
+warnings.simplefilter('ignore', category=VerifyWarning)
 
 # Parameter names from the 66-byte frame header
 FRAME_HEADER_PARAM_NAMES = [

@@ -172,28 +172,30 @@ def processCDS(args):
         DUALGAIN = (gainmode.strip().upper() in ['HDR','DUAL'])
 
         # Parse NSKIP
+        nskip = 0
         if args.nskip is not None:
             nskip = args.nskip
-        else:
-            try:
-                nskip = int(hdr0[skipkey])
-            except:
-                print('Could not get %s key:'%skipkey,f)
-                nskip = 0
+        ### CURRENTLY UNUSED
+        # else:
+        #     try:
+        #         nskip = int(hdr0[skipkey])
+        #     except:
+        #         print('Could not get %s key:'%skipkey,f)
         hdr0['NSKIPCDS'] = nskip
         if nskip>0: 
             assert MULTIEXT
             assert len(hdulist_orig)-nskip-1 >= 1  # subtract skipped extensions and primary
 
         # Parse GREY
+        grey = False
         if args.grey is not None:
             grey = args.grey
-        else:
-            try:
-                grey = hdr0[greykey].upper().strip() in ['TRUE','T']
-            except:
-                print('Could not get %s key:'%greykey,f)
-                grey = False
+        ### CURRENTLY UNUSED
+        # else:
+        #     try:
+        #         grey = hdr0[greykey].upper().strip() in ['TRUE','T']
+        #     except:
+        #         print('Could not get %s key:'%greykey,f)
         hdr0['GREYCDS'] = grey
 
         # Parse stacking; Require at least 2 image extensions to stack
