@@ -11,8 +11,8 @@
 # value listed here for that testbed.
 
 testbed1:
-  HOST: 131.215.196.219   # IP of computer running SQUID server
-  PORT: 7777              # SQUID server port
+  HOST: uvex-testbed1.caltech.edu   # Address of computer running SQUID server
+  PORT: 7777                        # SQUID server port
 
   # Optional Lakeshore temperature controller parameters
   # Set all three together to enable logging in TEMPDET FITS header
