@@ -212,7 +212,14 @@ class Keysight:
     def send_one_command(self, cmd):
         """Select this channel and send a single SCPI command to it.
         Retries up to CMD_ATTEMPTS times; raises ConnectionError if all fail."""
-        return self._with_retries(f'command {cmd!r}', lambda: self._send_once(cmd))
+
+        ret = self._with_retries(f'command {cmd!r}', lambda: self._send_once(cmd))
+
+        fault = self.fault_status()
+        if fault[0]:
+            raise RuntimeError(f'Keysight fault  {str(fault)}')
+
+        return ret
 
     def output_on(self):
         """Turn output ON for this channel."""
