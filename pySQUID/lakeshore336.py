@@ -72,6 +72,14 @@ OUTMODE_INPUT_CODES = {0: None, 1: "A", 2: "B", 3: "C", 4: "D", 5: "D2", 6: "D3"
 # linear percentage of max output.
 RANGE_LABELS = {0: "OFF", 1: "LOW", 2: "MED", 3: "HIGH"}
 
+# Fraction of the heater's maximum power delivered by each range setting
+# (HIGH = max, MED = max/10, LOW = max/100, OFF = 0).
+HEATER_RANGE_FRACTIONS = {0: 0.0, 1: 0.01, 2: 0.1, 3: 1.0}
+
+# HTRSET? field decodings (Lake Shore 336 manual, "HTRSET" command).
+HEATER_RESISTANCE_OHMS = {1: 25.0, 2: 50.0}
+HEATER_MAX_CURRENT_A = {1: 0.707, 2: 1.0, 3: 1.141, 4: 2.0}  # code 0 = user-specified
+
 
 def _transact(sock, command, expect_response=True, allow_empty=False):
     """Send one command over an already-open socket; optionally read back
@@ -95,6 +103,19 @@ def _transact(sock, command, expect_response=True, allow_empty=False):
     if not text and not allow_empty:
         raise ValueError("Empty response from instrument.")
     return text
+
+
+def _heater_max_power(sock, loop):
+    """Return a loop's maximum heater power in watts (I^2 * R), from the
+    HTRSET? command. Uses the user-specified max current when the
+    instrument's max-current field is set to 0."""
+    res_code, cur_code, user_current, _ = _transact(sock, f"HTRSET? {loop}").split(",")
+    resistance = HEATER_RESISTANCE_OHMS[int(res_code)]
+    if int(cur_code) == 0:
+        current = float(user_current)
+    else:
+        current = HEATER_MAX_CURRENT_A[int(cur_code)]
+    return current ** 2 * resistance
 
 
 class Lakeshore336:
@@ -340,20 +361,85 @@ class Lakeshore336:
 
         return True
 
+    def send_command(self, command: str, expect_response: bool | None = None) -> str | None:
+        """
+        Send a single raw SCPI-style command string to the Lake Shore 336
+        and return its response, if one is expected.
+
+        A new connection is opened for the command and closed afterward,
+        matching the other methods on this class. No retries are attempted:
+        setting commands are not safe to blindly resend.
+
+        Parameters
+        ----------
+        command : str
+            Command or query to send, without the line terminator (it is
+            appended automatically), e.g. "KRDG? A" or "SETP 1,50".
+        expect_response : bool or None, optional
+            Whether to read a response. If None (default), a response is
+            read only when the command contains "?" (a query, e.g.
+            "KRDG? A" or "KRDG?"). Pass True
+            to force a read, or False to send without reading.
+
+        Returns
+        -------
+        str or None
+            The instrument's response with the terminator stripped, or
+            None if no response was expected.
+
+        Raises
+        ------
+        ValueError
+            If `command` is empty or contains a line terminator.
+        ConnectionError
+            If communication with the instrument fails.
+        """
+        command = command.strip()
+        if not command:
+            raise ValueError("Command must be a non-empty string.")
+        if "\r" in command or "\n" in command:
+            raise ValueError("Command must not contain line terminators.")
+
+        if expect_response is None:
+            expect_response = "?" in command
+
+        sock: socket.socket | None = None
+        try:
+            sock = socket.create_connection((self.host, self.port), timeout=self.timeout)
+            sock.settimeout(self.timeout)
+            return _transact(
+                sock, command, expect_response=expect_response, allow_empty=True
+            )
+        except OSError as err:
+            raise ConnectionError(
+                f"Failed to send command '{command}' to Lakeshore 336 at "
+                f"{self.host}:{self.port}: {err}"
+            ) from err
+        finally:
+            if sock is not None:
+                try:
+                    sock.close()
+                except OSError:
+                    pass
+
     def loop_info(self, channel: str | int) -> None:
         """
         Print information about a Lake Shore 336 control loop or input
         channel, depending on which kind of channel string is given, as
         one standardized line per input/loop pairing:
 
-            INPUT: <letter or NONE>   NAME: <saved name or NONE>   TEMP: <reading or NONE>   LOOP: <designator or NONE>   SET: <setpoint or NONE>   HEAT: <ON/OFF or NONE>   PWR: <percent of range label, or NONE>
+            INPUT: <letter or NONE>   NAME: <saved name or NONE>   TEMP: <reading or NONE>   LOOP: <designator or NONE>   SET: <setpoint or NONE>   HEAT: <range label> (max <range max>W) or NONE   PWR: <percent>% (<actual>W) or NONE
+
+        The HEAT range max is the heater's maximum power (from HTRSET?,
+        computed as I^2 * R) scaled by the selected range: HIGH = 1x,
+        MED = 1/10, LOW = 1/100, OFF = 0. The PWR actual is the range max
+        times the output percentage (HTR?).
 
         If `channel` is a valid control-loop designator (1 or 2, as a str
         or int), prints a single row: the input that loop reads from
         (INPUT: NONE if none assigned) with its saved hardware name and
         current temperature (KRDG?), and that loop's setpoint (SETP?),
-        heater ON/OFF state (RANGE?), and output power as a percentage of
-        the currently selected range's max, labeled OFF/LOW/MED/HIGH (HTR?).
+        heater range (RANGE?), and output power.
 
         If `channel` is a valid input channel letter (A, B, C, D, D2, D3,
         D4), prints that input's saved hardware name and current
@@ -387,25 +473,29 @@ class Lakeshore336:
                 f"{sorted(VALID_RAMP_CHANNELS)} or an input channel {sorted(VALID_CHANNELS)}."
             )
 
-        def _row(input_val, name_val, temp_str, loop_val, set_str, heat_val, pwr_str):
+        def _row(input_val, name_val, temp_str, loop_val, set_str, heat_str, pwr_str):
             print(
                 f"INPUT: {input_val or 'NONE'}   "
                 f"NAME: {name_val or 'NONE'}   "
                 f"TEMP: {temp_str or 'NONE'}   "
                 f"LOOP: {loop_val or 'NONE'}   "
                 f"SET: {set_str or 'NONE'}   "
-                f"HEAT: {heat_val or 'NONE'}   "
+                f"HEAT: {heat_str or 'NONE'}   "
                 f"PWR: {pwr_str or 'NONE'}"
             )
 
         def _heater_status(sock, loop):
-            """Query heater ON/OFF and range label (RANGE?), and output
-            power as a % of that range's max (HTR?), for a loop."""
+            """Return (heat_str, pwr_str) for a loop's heater: the range
+            label with that range's max power (RANGE?, HTRSET?), and the
+            actual power (range max * HTR? percentage / 100)."""
             range_code = int(float(_transact(sock, f"RANGE? {loop}")))
-            status = "OFF" if range_code == 0 else "ON"
             range_label = RANGE_LABELS.get(range_code, str(range_code))
-            power = float(_transact(sock, f"HTR? {loop}"))
-            return status, range_label, power
+            percent = float(_transact(sock, f"HTR? {loop}"))
+            range_max_w = _heater_max_power(sock, loop) * HEATER_RANGE_FRACTIONS.get(range_code, 0.0)
+            actual_w = range_max_w * percent / 100.0
+            heat_str = f"{range_label} (max {range_max_w:.2f}W)"
+            pwr_str = f"{percent:.2f}% ({actual_w:.2f}W)"
+            return heat_str, pwr_str
 
         sock: socket.socket | None = None
         try:
@@ -425,10 +515,10 @@ class Lakeshore336:
                     temp_str = None
 
                 setpoint = float(_transact(sock, f"SETP? {channel}"))
-                status, range_label, power = _heater_status(sock, channel)
+                heat_str, pwr_str = _heater_status(sock, channel)
                 _row(
                     input_letter, name, temp_str, channel,
-                    f"{setpoint:.3f} K", status, f"{power:.2f}% of {range_label}"
+                    f"{setpoint:.3f} K", heat_str, pwr_str
                 )
 
             else:
@@ -447,10 +537,10 @@ class Lakeshore336:
                 if used_by:
                     for loop in used_by:
                         setpoint = float(_transact(sock, f"SETP? {loop}"))
-                        status, range_label, power = _heater_status(sock, loop)
+                        heat_str, pwr_str = _heater_status(sock, loop)
                         _row(
                             channel_upper, name, temp_str, loop,
-                            f"{setpoint:.3f} K", status, f"{power:.2f}% of {range_label}"
+                            f"{setpoint:.3f} K", heat_str, pwr_str
                         )
                 else:
                     _row(channel_upper, name, temp_str, None, None, None, None)
