@@ -101,9 +101,10 @@ def check_for_updates():
         print("pySQUID is up to date.")
         return
 
-    print(f"\npySQUID is {behind} commit(s) behind {upstream}.")
+    print(f"\npySQUID is NOT up to date.")
+    print(f"pySQUID is {behind} commit(s) behind {upstream}.")
     try:
-        answer = input('Quit now so you can git pull and pip install . ?  Y/[N] > ').strip()
+        answer = input('Quit now so you can pull and install latest version?  Y/[N] > ').strip()
     except EOFError:
         answer = ""
     if answer.upper() == 'Y':
