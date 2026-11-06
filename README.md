@@ -6,7 +6,7 @@
 Control and data-reduction tools for SQUID (Server for Quick UVEX Image Data).
 
 pySQUID is a toolkit for operating a UVEX detector testbed camera and for
-turning its raw output (`.bin` acquisitions, raw CMOS FITS frames) into
+turning its raw output (`.bin` acquisitions) into
 science-ready FITS files. It installs as a normal Python package and adds
 three commands to your environment:
 
