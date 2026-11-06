@@ -18,6 +18,7 @@ import yaml
 
 from . import lakeshore336
 from . import keysight_lan
+from . import update_check
 
 TO_DEFAULT = 3 # Default timeout (s) for server connections and commands
 LKS_RETRIES = 3 # Default retry count for Lakeshore 336 temperature reads
@@ -170,7 +171,13 @@ def _check_not_protected(key):
 
 class Camera(_DeprecatedSquidLED):
 
-    def __init__(self, userConfigFile):
+    def __init__(self, userConfigFile, version_check=True):
+
+        # Check for updates first. Warns and continues if the check fails;
+        # exits only if the user chooses to quit and pull the latest version.
+        # Pass version_check=False to skip the check.
+        if version_check:
+            update_check.check_for_updates()
 
         with open(userConfigFile, 'r') as file:
             config = yaml.safe_load(file)
