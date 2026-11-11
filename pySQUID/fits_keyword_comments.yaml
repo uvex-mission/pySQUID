@@ -59,6 +59,9 @@ FLASHV:   "[V] LED voltage during flash"
 EXP_ID:   "Exposure Index"
 COMPLETE: "Frame completeness check"
 
+LEDMS:    "[ms] LED on-time (upper 10 bits of SETTLET word)"
+LEDSEC:   "[s] LED on-time (upper 10 bits of PIXELT word)"
+
 NOGLO:    "NOGLO MISC Setting (0-15)"
 PICO_VER: "PICO MISC setting (0-7)"
 PICO_DES: "PICO Description"

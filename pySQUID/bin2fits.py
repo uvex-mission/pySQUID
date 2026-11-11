@@ -85,6 +85,12 @@ KSCALE            = 4     # Divide data by even integer to reduce file size; aff
 
 PIPELINE_SCHEMA_VERSION = "2.0.0"  # bumped: DAC_VOLTAGE_KEYS now stored in volts, not raw DN
 
+# Words packing a 6-bit timing parameter (low bits) with a 10-bit LED time (high bits)
+LED_PACKED_PARAMS = {
+    "SETTLET": ("LEDMS",  "[ms] LED on-time (upper 10 bits of SETTLET word)"),
+    "PIXELT":  ("LEDSEC", "[s] LED on-time (upper 10 bits of PIXELT word)"),
+}
+
 VARIABLE_PARAMS = ["FRMCNT", "MSEC"]
 CONSTANT_PARAMS = [p for p in FRAME_HEADER_PARAM_NAMES if p not in VARIABLE_PARAMS]
 
@@ -468,7 +474,13 @@ def build_ext_header(hdu, exp_idx, is_complete, num_scans,
         if p_idx >= len(header_params_raw):
             break
         val = int(header_params_raw[p_idx])
-        if name == "PICO_XORD":
+        if name in LED_PACKED_PARAMS:
+            # Each 16-bit word packs two fields: lower 6 bits = timing param,
+            # upper 10 bits = LED on-time (LEDMS for SETTLET, LEDSEC for PIXELT).
+            led_key, led_desc = LED_PACKED_PARAMS[name]
+            h[name]    = (val & 0x3F, f'Board Param: {name} (raw word={val})')
+            h[led_key] = (val >> 6,   f'{led_desc} (raw word={val})')
+        elif name == "PICO_XORD":
             pico_ver = (val >> 8) & 0xFF
             x_order  = val & 0xFF
             h['PICO_VER'] = pico_ver
