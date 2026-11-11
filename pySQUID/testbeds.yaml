@@ -24,6 +24,6 @@ testbed1:
   # Optional Keysight power supply parameters 
   # Set all three together to enable Camera's KEYSIGHT_* methods
   # Comment out if no Keysight is attached
-  KEYSIGHT_HOST: 131.215.196.182
-  KEYSIGHT_PORT: 5025     # SCPI/VXI-11 port
-  KEYSIGHT_CHAN: 1        # Default channel (e.g. LED driver channel)
+  KYSTHOST: 131.215.196.182
+  KYSTPORT: 5025     # SCPI/VXI-11 port
+  KYSTCHAN: 1        # Default channel (e.g. LED driver channel)

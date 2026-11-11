@@ -65,8 +65,8 @@ TESTBED_REQUIRED_KEYS = ['HOST', 'PORT']
 LKS_OPTIONAL_KEYS = ['LKS_HOST', 'LKS_PORT', 'LKS_CHAN']
 
 # Optional per-testbed Keysight power supply settings 
-# If KEYSIGHT_HOST IS given, KEYSIGHT_PORT and KEYSIGHT_CHAN must be given too
-KEYSIGHT_OPTIONAL_KEYS = ['KEYSIGHT_HOST', 'KEYSIGHT_PORT', 'KEYSIGHT_CHAN']
+# If KYSTHOST IS given, KYSTPORT and KYSTCHAN must be given too
+KEYSIGHT_OPTIONAL_KEYS = ['KYSTHOST', 'KYSTPORT', 'KYSTCHAN']
 
 # Per-device settings (VEXTRAHI, VEXTRALO, ...) looked up from
 # devices.yaml by DETID. Unlike TESTBED_REQUIRED_KEYS, these always end up
@@ -229,25 +229,25 @@ class Camera(_DeprecatedSquidLED):
             if self.configured_LKS else None
         )
 
-        # KEYSIGHT_HOST (power supply, direct LAN control) is optional -- a
-        # testbed need not have one attached. But if KEYSIGHT_HOST IS given,
-        # KEYSIGHT_PORT and KEYSIGHT_CHAN must be given too.
-        self.configured_KEYSIGHT = 'KEYSIGHT_HOST' in config
+        # KYSTHOST (power supply, direct LAN control) is optional -- a
+        # testbed need not have one attached. But if KYSTHOST IS given,
+        # KYSTPORT and KYSTCHAN must be given too.
+        self.configured_KEYSIGHT = 'KYSTHOST' in config
 
         if self.configured_KEYSIGHT:
             _require_keys(
                 config, KEYSIGHT_OPTIONAL_KEYS, testbedContext,
-                extra=f"KEYSIGHT_HOST is set, so {'/'.join(KEYSIGHT_OPTIONAL_KEYS)} must all be given together."
+                extra=f"KYSTHOST is set, so {'/'.join(KEYSIGHT_OPTIONAL_KEYS)} must all be given together."
             )
-            config['KEYSIGHT_PORT'] = int(config['KEYSIGHT_PORT']) # Fix the type
-            config['KEYSIGHT_CHAN'] = int(config['KEYSIGHT_CHAN']) # Fix the type
+            config['KYSTPORT'] = int(config['KYSTPORT']) # Fix the type
+            config['KYSTCHAN'] = int(config['KYSTCHAN']) # Fix the type
 
         # Build the Keysight handle now (fixed host/port/channel for the
         # life of this Camera); None if no Keysight is configured for this
         # testbed. See KEYSIGHT_* methods below for how self.dryrun is handled
         self.keysight = (
             keysight_lan.Keysight(
-                config['KEYSIGHT_HOST'], config['KEYSIGHT_PORT'], config['KEYSIGHT_CHAN']
+                config['KYSTHOST'], config['KYSTPORT'], config['KYSTCHAN']
             )
             if self.configured_KEYSIGHT else None
         )
@@ -316,7 +316,7 @@ class Camera(_DeprecatedSquidLED):
         # A failure here or in any Keysight command raises errors, stopping the script.
         if not self.configured_KEYSIGHT:
             print('WARNING: no Keysight power supply configured for this testbed '
-                  '(KEYSIGHT_HOST not set) -- KEYSIGHT_* methods will be unavailable')
+                  '(KYSTHOST not set) -- KEYSIGHT_* methods will be unavailable')
         else:
             try:
                 self.keysight.state()
@@ -700,7 +700,7 @@ class Camera(_DeprecatedSquidLED):
         if not self.configured_KEYSIGHT:
             raise RuntimeError(
                 'No Keysight power supply configured for this testbed '
-                '(KEYSIGHT_HOST not set in testbeds.yaml or your config file).'
+                '(KYSTHOST not set in testbeds.yaml or your config file).'
             )
 
     def _KEYSIGHT_guard(self, **kwargs):
