@@ -1,19 +1,35 @@
 # Testbed settings for users to edit manually
 OPERATOR: cshapiro  # Who are you?
-TESTBED:  testbed1  # Which testbed station? 
+TESTBED:  testbed1  # Which testbed station?
 
-DETID:    W08D02    # CMOS detector ID
+DETID:    W08D03    # CMOS detector ID
 DETTYPE:  NUV       # UVEX detector type (FUV / NUV / LSS / ENG)
 DETCTRL:  BB2       # Detector controller type
 LEDWAVE:  530       # LED wavelength in nm
 
 
 #-------- OVERRIDES --------#
+# Uncomment any line below to override the value from testbeds.yaml or devices.yaml.
+# Values set here take priority over both files.
 
-# HOST/PORT are looked up from testbeds.yaml based on TESTBED
-# HOST:   131.215.196.219  # SQUID IP address for this testbed
-# PORT:   7777             # SQUID server port
+# Per-testbed connection settings (from testbeds.yaml, keyed by TESTBED)
+# HOST:      131.215.196.219  # SQUID IP address for this testbed
+# PORT:      7777             # SQUID server port
+# LKS_HOST:  uvextc1.caltech.edu  # Lakeshore 336 address; set LKS_HOST/LKS_PORT/LKS_CHAN together
+# LKS_PORT:  7777                 # Lakeshore 336 port
+# LKS_CHAN:  C                    # Lakeshore input channel for TEMPDET (A, B, C, D, D2, D3, D4)
+# KYSTHOST:  131.215.196.182      # Keysight power supply address; set KYSTHOST/KYSTPORT/KYSTCHAN together
+# KYSTPORT:  5025                 # Keysight SCPI/VXI-11 port
+# KYSTCHAN:  1                    # Keysight default channel (e.g. LED driver channel)
 
-# VEXTRAHI/VEXTRALO are looked up from devices.yaml based on DETID
-# VEXTRAHI: 3.016     # V_EXTRA for high gain
-# VEXTRALO: 3.182     # V_EXTRA for low gain
+# Per-device settings (from devices.yaml, keyed by DETID; DEFAULT fills any missing key)
+# VEXTRAHI: 3.011  # V_EXTRA for high gain (set automatically by set_gain)
+# VEXTRALO: 3.177  # V_EXTRA for low gain (set automatically by set_gain)
+
+# Per-device bias and NOGLO settings applied by restartBBX() after _load().
+# Key names are case-insensitive. Values shown are examples only.
+# PIX_REF:     2.59  # V; overrides the devices.yaml value for this DETID
+# PIX_SUPPLY:  3.0   # V
+# VHIGH_TG:    3.0   # V
+# VLOW_TG:     1.0   # V
+# NOGLO:       14    # Detector controller NOGLO mode, 8-15

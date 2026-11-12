@@ -27,8 +27,6 @@ TEMPDET_NONE = -999.0 # TEMPDET value written when Lakeshore is unavailable
 # Safety limits; ### TBC
 VMIN, VMAX = (0,3.3)
 
-NOGLO_DEFAULT = 14 # Typically best mode
-
 NICARD_DELAY = 2.   # Delay between sending "expose" and start of 1st frame scan
 WRITE_DELAY_S = 11. # Overhead to write data file
 SCANTIME_S   = 8.4  # Aproximate FULL-FRAME scan time ### Different for each mode
@@ -74,6 +72,9 @@ KEYSIGHT_OPTIONAL_KEYS = ['KYSTHOST', 'KYSTPORT', 'KYSTCHAN']
 # DEFAULT entry is used instead (with a warning).
 DEVICE_KEYS = ['VEXTRAHI', 'VEXTRALO']
 
+# Known names of bias voltages that can be individualy set by Camera.set_bias()
+BIAS_NAMES = ['PIX_REF', 'V_EXTRA', 'PIX_SUPPLY', 'VHIGH_TG', 'VLOW_TG']
+
 # Reserved key in devices.yaml holding fallback values for any DETID not
 # otherwise listed there
 DEVICES_DEFAULT_KEY = 'DEFAULT'
@@ -117,35 +118,56 @@ def get_testbed_defaults(testbed, testbedsFile=_TESTBEDS_PATH):
     return testbeds[testbed]
 
 
+def _upper_keys(d):
+    '''Return a copy of dict `d` with keys stripped and uppercased (None -> {})'''
+    return {str(k).strip().upper(): v for k, v in (d or {}).items()}
+
+
 def get_device_defaults(detid, devicesFile=_DEVICES_PATH):
-    '''Look up the default per-device settings (VEXTRAHI, VEXTRALO, ...)
+    '''Look up the default per-device settings (VEXTRAHI, VEXTRALO, PIX_REF, NOGLO, ...)
     for a DETID.
 
     detid:       DETID value, as it would appear in a user's config file
     devicesFile: path to the YAML file mapping DETIDs to their settings
                  (defaults to devices.yaml shipped alongside this module)
 
-    Returns a dict of settings for that device. If devicesFile has no
-    entry for the given DETID, a warning is printed, the file's
-    DEVICES_DEFAULT_KEY ('DEFAULT') entry is offered as a fallback, and
-    the user is prompted to confirm before proceeding with it.
+    Keys are case-insensitive. Each key missing from the DETID's entry is
+    filled in from the file's DEVICES_DEFAULT_KEY ('DEFAULT') entry.
+    If devicesFile has no entry for the given DETID, a warning is printed,
+    the DEFAULT entry is offered as the settings, and the user is prompted
+    to confirm before proceeding with it.
     '''
     with open(devicesFile, 'r') as file:
         devices = yaml.safe_load(file) or {}
 
+    default = _upper_keys(devices.get(DEVICES_DEFAULT_KEY))
+
     if detid not in devices:
-        fallback = devices.get(DEVICES_DEFAULT_KEY, {})
         print(f"\n\nWARNING: DETID '{detid}' is not a known device name; "
-              f"falling back to '{DEVICES_DEFAULT_KEY}' entry: {fallback}")
+              f"falling back to '{DEVICES_DEFAULT_KEY}' entry: {default}")
         proceed = input('CONTINUE WITH THESE DEFAULT VALUES?  y/[N] > ').strip() or ""
         if proceed.upper() != 'Y':
             raise Exception(
                 f"Please add DETID '{detid}' to {devicesFile}, or set "
                 f"{'/'.join(DEVICE_KEYS)} explicitly in your config file."
             )
-        return dict(fallback)
+        return default
 
-    return devices[detid]
+    return {**default, **_upper_keys(devices[detid])}
+
+
+def _resolve_bias_settings(*sources):
+    '''Collect the BIAS_NAMES and NOGLO settings from `sources`, matching keys
+    case-insensitively. `sources` are dicts in priority order (highest first).
+    Returns a dict with uppercase keys; settings absent from every source are omitted.
+    '''
+    settable = BIAS_NAMES + ['NOGLO']
+    resolved = {}
+    for source in reversed(sources):  # lowest priority first, so higher priority overwrites
+        for key, value in _upper_keys(source).items():
+            if key in settable:
+                resolved[key] = value
+    return resolved
 
 
 def _require_keys(config, keys, context, extra=None):
@@ -257,6 +279,7 @@ class Camera(_DeprecatedSquidLED):
         # entry (with a warning) if DETID isn't listed there. Anything the
         # user sets explicitly in their own config file still takes priority.
         deviceDefaults = get_device_defaults(config['DETID'])
+        self.biasSettings = _resolve_bias_settings(config, deviceDefaults)  # Applied in restartBBX()
         config = {**deviceDefaults, **config}
 
         # Normalize types in-place (YAML may hand these back as strings
@@ -282,9 +305,6 @@ class Camera(_DeprecatedSquidLED):
 
         # Remove all FITS headers and set required headers from config
         self.FITSkey_clear()
-
-        # Set default NOGLO mode
-        self.set_NOGLO(NOGLO_DEFAULT)
 
         # Naming convention
         self.send('set name_format standard')  # standard "basename_0000" | procedure "DATETIME_filename_0000"
@@ -496,8 +516,17 @@ class Camera(_DeprecatedSquidLED):
         settle:  Wait time (s) after reset before continuing.
         This can be cleanly interrupted with CTRL-C.
         '''
-        _ = self._load()
-        print(_)
+        print(self._load())
+
+        # Apply per-device bias and NOGLO settings, if any were configured
+        for name in BIAS_NAMES:
+            if name in self.biasSettings:
+                self.set_bias(name, float(self.biasSettings[name]))
+        if 'NOGLO' in self.biasSettings:
+            self.set_NOGLO(int(self.biasSettings['NOGLO']))
+
+        self.set_gain('HIGH')
+
         _ = self._init()
         print(_)
 
@@ -559,8 +588,11 @@ class Camera(_DeprecatedSquidLED):
             # Replace required FITS headers
             print('Setting required FITS headers')
 
-            # Circumvent FITSkey(), set all protected FITS headers
-            for k,v in self.config.items(): self.send(f'fits_set {k} {v}')  
+            # Circumvent FITSkey(), set all protected FITS headers.
+            # Bias and NOGLO settings are skipped: they are recorded in the BIN file header by the camera, not here.
+            for k,v in self.config.items():
+                if k.upper() in BIAS_NAMES + ['NOGLO']: continue
+                self.send(f'fits_set {k} {v}')
 
     def FITSkey_list(self):
         '''List all user-defined FITS header keys/values'''
@@ -657,8 +689,7 @@ class Camera(_DeprecatedSquidLED):
         volts:  bias voltage (V)
         '''
 
-        OKbiases = ['PIX_REF', 'V_EXTRA', 'PIX_SUPPLY', 'VHIGH_TG', 'VLOW_TG']
-        if bias.upper().strip() not in OKbiases:
+        if bias.upper().strip() not in BIAS_NAMES:
             raise ValueError('Invalid bias name: '+bias)
 
         if (volts<VMIN) or (volts>VMAX):

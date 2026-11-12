@@ -15,7 +15,11 @@
 DEFAULT:
   VEXTRAHI: 3.011  # V_EXTRA for high gain
   VEXTRALO: 3.177  # V_EXTRA for low gain
+  NOGLO:    14
 
 W08D02:
-  VEXTRAHI: 3.011  # V_EXTRA for high gain
-  VEXTRALO: 3.177  # V_EXTRA for low gain
+  NOGLO:    14     # Best NOGLO for this device
+
+W08D03:
+  PIX_REF:  2.59   # Determined 2026-11-11 via PARMCHK
+  NOGLO:    11     # Best NOGLO for this device
