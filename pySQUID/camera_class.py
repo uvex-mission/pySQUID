@@ -25,7 +25,7 @@ LKS_RETRIES = 3 # Default retry count for Lakeshore 336 temperature reads
 TEMPDET_NONE = -999.0 # TEMPDET value written when Lakeshore is unavailable
 
 # Safety limits; ### TBC
-VMIN, VMAX = (0,3.3)
+VMIN, VMAX = (-1,3.3)
 
 NICARD_DELAY = 2.   # Delay between sending "expose" and start of 1st frame scan
 WRITE_DELAY_S = 11. # Overhead to write data file

@@ -27,4 +27,4 @@ W08D02:
 
 W08D03:
   PIX_REF:  2.59   # Determined 2026-11-11 via PARMCHK
-  NOGLO:    11     # Determined 2026-11-11 via DARKTEST
+  NOGLO:    13     # Determined 2026-11-11 via DARKTEST
