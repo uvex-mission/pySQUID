@@ -494,7 +494,15 @@ def build_ext_header(hdu, exp_idx, is_complete, num_scans,
 
     # Timing parameters
     h['TIMMISC_'] = h['FRMCNT'] + h['MSEC']/1000.
-    h['TIMEXP_'] = h['TIMMISC_']-TIMMISC_last if TIMMISC_last>0 else -1.
+    # First check for valid TIMMISC_last
+    if TIMMISC_last > 0:
+        h['TIMEXP_'] = h['TIMMISC_']-TIMMISC_last
+        if h['TIMEXP_'] < 0:
+            h['TIMEXP_'] += 2**16  # MISC timer turns over at 2**16
+    else:
+        # Not sure when previous frame started
+        h['TIMEXP_'] = -1
+    #h['TIMEXP_'] = h['TIMMISC_']-TIMMISC_last if TIMMISC_last>0 else -1.
     h['TIMEXP_'] = round(h['TIMEXP_'], 3)
     h['EXPTIME'] = h['TIMEXP_']
 
