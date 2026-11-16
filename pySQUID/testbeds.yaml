@@ -11,19 +11,20 @@
 # value listed here for that testbed.
 
 testbed1:
-  HOST: uvex-testbed1.caltech.edu   # Address of computer running SQUID server
+  HOST: 192.168.134.1   # Address of computer running SQUID server
+  # HOST: uvex-testbed1.caltech.edu   # Address of computer running SQUID server
   PORT: 7777                        # SQUID server port
 
   # Optional Lakeshore temperature controller parameters
   # Set all three together to enable logging in TEMPDET FITS header
   # Comment out if no Lakeshore is attached
-  LKS_HOST: uvextc1.caltech.edu  # Comment out if not using Lakeshore
+  LKS_HOST: 192.168.134.2  # Comment out if not using Lakeshore
   LKS_PORT: 7777
   LKS_CHAN: C  # Input channel to read for TEMPDET (A, B, C, D, D2, D3, D4)
 
   # Optional Keysight power supply parameters 
   # Set all three together to enable Camera's KEYSIGHT_* methods
   # Comment out if no Keysight is attached
-  KYSTHOST: 131.215.196.182
+  KYSTHOST: 192.168.134.3
   KYSTPORT: 5025     # SCPI/VXI-11 port
   KYSTCHAN: 1        # Default channel (e.g. LED driver channel)
